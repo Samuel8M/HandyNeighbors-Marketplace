@@ -91,6 +91,15 @@ data resets on every redeploy or restart, and the service spins down after
 Fine for a demo anyone can reach; for real persistence, swap in a managed
 Postgres/SQLite service (e.g. Render's paid disks, or Turso) later.
 
+`.npmrc` in this repo sets `build-from-source=true` — without it,
+`better-sqlite3`'s prebuilt native binary segfaulted immediately on start
+on Render's runtime (`Segmentation fault (core dumped)`, exit 139), even
+on a clean `npm install` with no cache involved. Forcing a from-source
+build via `node-gyp` on the target machine avoids shipping a binary built
+for a different environment. This costs a slightly longer first build and
+is worth keeping if this ever moves to another host with the same
+symptom.
+
 ## Live demo (static build)
 
 **https://samuel8m.github.io/HandyNeighbors-Marketplace/**
