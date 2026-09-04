@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HandyNeighbors — free local handyman marketplace</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-row">
+      <a class="brand" href="#find">
+        <span class="brand-mark" aria-hidden="true">🛠️</span>
+        HandyNeighbors
+      </a>
+      <nav class="tabs" aria-label="Primary">
+        <button class="tab-btn is-active" data-tab="find">Find a Handyman</button>
+        <button class="tab-btn" data-tab="price">Price Check</button>
+        <button class="tab-btn" data-tab="post">List Your Services</button>
+      </nav>
+      <span class="free-badge">Free &amp; ad-free</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+
+    <!-- ============ FIND ============ -->
+    <section id="find" class="tab-panel is-active">
+      <div class="hero">
+        <h1>Fix-it help from actual neighbors, not companies.</h1>
+        <p>Every listing is one independent person — their own skills, their own tools, their own hourly rate. Free to browse, free to post, no fees, no middlemen.</p>
+      </div>
+
+      <div class="city-browser">
+        <h2 class="section-label">Browse by city</h2>
+        <div id="city-chips" class="city-chips"><p class="empty-note-inline">No listings yet — post the first one and your city shows up here.</p></div>
+      </div>
+
+      <form id="search-form" class="panel search-form">
+        <div class="field">
+          <label for="search-skill">Skill</label>
+          <select id="search-skill" name="skill">
+            <option value="">Any skill</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="search-equipment">Equipment</label>
+          <select id="search-equipment" name="equipment">
+            <option value="">Any equipment</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="search-city">City</label>
+          <input id="search-city" name="city" type="text" placeholder="e.g. Pittsburgh" />
+        </div>
+        <div class="field">
+          <label for="search-state">State</label>
+          <input id="search-state" name="state" type="text" placeholder="e.g. PA" maxlength="40" />
+        </div>
+        <div class="field">
+          <label for="search-max-rate">Max rate ($/hr)</label>
+          <input id="search-max-rate" name="maxRate" type="number" min="1" max="500" placeholder="e.g. 60" />
+        </div>
+        <div class="field field-grow">
+          <label for="search-q">Search name or bio</label>
+          <input id="search-q" name="q" type="text" placeholder="e.g. drywall, sinks, decks" />
+        </div>
+        <div class="field">
+          <label for="search-sort">Sort by</label>
+          <select id="search-sort" name="sortBy">
+            <option value="newest">Newest</option>
+            <option value="rate_asc">Rate: low to high</option>
+            <option value="rate_desc">Rate: high to low</option>
+            <option value="rating_desc">Top rated</option>
+          </select>
+        </div>
+        <div class="field field-actions">
+          <button type="submit" class="btn btn-primary">Search</button>
+          <button type="button" id="search-reset" class="btn btn-ghost">Reset</button>
+        </div>
+      </form>
+
+      <p id="results-summary" class="results-summary" aria-live="polite"></p>
+      <div id="results" class="worker-grid"></div>
+    </section>
+
+    <!-- ============ PRICE CHECK ============ -->
+    <section id="price" class="tab-panel">
+      <div class="hero hero-sm">
+        <h1>Price-match your job before you hire (or before you post a rate).</h1>
+        <p>Pick a skill and, optionally, a location — see what neighbors are actually charging.</p>
+      </div>
+
+      <form id="price-form" class="panel search-form">
+        <div class="field">
+          <label for="price-skill">Skill</label>
+          <select id="price-skill" name="skill" required>
+            <option value="" disabled selected>Choose a skill…</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="price-city">City (optional)</label>
+          <input id="price-city" name="city" type="text" placeholder="e.g. Pittsburgh" />
+        </div>
+        <div class="field">
+          <label for="price-state">State (optional)</label>
+          <input id="price-state" name="state" type="text" placeholder="e.g. PA" maxlength="40" />
+        </div>
+        <div class="field field-actions">
+          <button type="submit" class="btn btn-primary">Check price</button>
+        </div>
+      </form>
+
+      <div id="price-result" class="price-result" hidden>
+        <div class="price-stats">
+          <div class="stat"><span class="stat-label">Listings found</span><span class="stat-value" id="price-count">–</span></div>
+          <div class="stat"><span class="stat-label">Low</span><span class="stat-value" id="price-low">–</span></div>
+          <div class="stat"><span class="stat-label">Average</span><span class="stat-value" id="price-average">–</span></div>
+          <div class="stat"><span class="stat-label">Median</span><span class="stat-value" id="price-median">–</span></div>
+          <div class="stat"><span class="stat-label">High</span><span class="stat-value" id="price-high">–</span></div>
+        </div>
+        <div id="price-bar" class="price-bar" aria-hidden="true"></div>
+        <ul id="price-workers" class="price-worker-list"></ul>
+      </div>
+      <p id="price-empty" class="empty-note" hidden>No one has listed that skill in this area yet — be the first.</p>
+    </section>
+
+    <!-- ============ POST ============ -->
+    <section id="post" class="tab-panel">
+      <div class="hero hero-sm">
+        <h1>List your services — free, forever.</h1>
+        <p>No fees, no commission, no company required. Just you, your tools, and your rate. Payment happens directly between you and whoever hires you — HandyNeighbors never touches your money.</p>
+      </div>
+
+      <form id="post-form" class="panel post-form">
+        <div class="form-grid">
+          <div class="field">
+            <label for="post-name">Your name</label>
+            <input id="post-name" name="name" type="text" required maxlength="80" />
+          </div>
+          <div class="field">
+            <label for="post-rate">Hourly rate ($)</label>
+            <input id="post-rate" name="hourlyRate" type="number" min="1" max="500" step="1" required />
+          </div>
+          <div class="field">
+            <label for="post-city">City</label>
+            <input id="post-city" name="city" type="text" required maxlength="80" />
+          </div>
+          <div class="field">
+            <label for="post-state">State</label>
+            <input id="post-state" name="state" type="text" required maxlength="40" />
+          </div>
+          <div class="field">
+            <label for="post-radius">Service radius (miles)</label>
+            <input id="post-radius" name="serviceRadiusMiles" type="number" min="1" max="200" value="10" />
+          </div>
+          <div class="field">
+            <label for="post-email">Contact email</label>
+            <input id="post-email" name="contactEmail" type="email" maxlength="200" />
+          </div>
+          <div class="field">
+            <label for="post-phone">Contact phone</label>
+            <input id="post-phone" name="contactPhone" type="tel" maxlength="40" />
+          </div>
+        </div>
+        <p class="field-hint">Provide at least one of email or phone so people can reach you.</p>
+
+        <div class="field">
+          <label for="post-bio">Short bio</label>
+          <textarea id="post-bio" name="bio" maxlength="1000" rows="3" placeholder="What you fix, how long you've been doing it, anything people should know."></textarea>
+        </div>
+
+        <fieldset class="tag-fieldset">
+          <legend>Skills (pick what you actually do)</legend>
+          <div id="post-skills" class="tag-checks"></div>
+        </fieldset>
+
+        <fieldset class="tag-fieldset">
+          <legend>Equipment you own (optional, but it helps you get matched)</legend>
+          <div id="post-equipment" class="tag-checks"></div>
+        </fieldset>
+
+        <button type="submit" class="btn btn-primary">Post my listing — it's free</button>
+      </form>
+
+      <div id="post-success" class="panel post-success" hidden>
+        <h2>You're live 🎉</h2>
+        <p>Your listing is saved in this browser and shows up on the Find tab now.</p>
+        <p><a href="#" id="view-listing-link">View your listing →</a></p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Worker detail modal -->
+  <div id="worker-modal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-name">
+      <button type="button" id="modal-close" class="modal-close" aria-label="Close">✕</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="wrap footer-content">
+      <p><strong>HandyNeighbors</strong> is a free directory — it lists independent workers and lets you compare local prices. It is not an employer, contractor, escrow service, or payment processor. Workers listed here are independent individuals, not employees of HandyNeighbors, and are not verified, licensed, bonded, or insured by this platform. Arrange payment and confirm any needed licensing directly with the person you hire.</p>
+      <p>This is the static demo build, hosted on GitHub Pages: everything runs in your browser and listings are saved to this browser's local storage only, not shared with other visitors. The full version — a real shared backend with Express, SQLite, and server-enforced edit-token security — is the source in this same repository.</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

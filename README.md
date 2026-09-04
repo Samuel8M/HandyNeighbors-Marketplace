@@ -72,7 +72,21 @@ public/
 test/
   workerService.test.js  # unit tests against the service layer directly
   server.test.js         # integration tests against a real HTTP server
+docs/
+  index.html, style.css, app.js  # a static build for GitHub Pages — see below
 ```
+
+## Live demo (static build)
+
+`docs/` is a separate, self-contained build of the same UI for GitHub Pages,
+which only serves static files and can't run the Express/SQLite backend
+above. It's the same HTML/CSS, with `app.js` rewritten to read and write
+`localStorage` instead of calling the API — no server, no shared data
+between visitors, seeded with a few example listings on first load. It's a
+demo of the interface, not the product: edit-token security, a real shared
+database, and the full test suite only exist in the Express version. Once
+GitHub Pages is enabled for this repo (Settings → Pages → deploy from
+`main` / `docs`), it's served free, permanently, straight from the repo.
 
 ## Getting started
 
