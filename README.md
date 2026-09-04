@@ -76,6 +76,21 @@ docs/
   index.html, style.css, app.js  # a static build for GitHub Pages — see below
 ```
 
+## Live, shared version (real backend, public to anyone)
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/Samuel8M/HandyNeighbors-Marketplace)
+
+`render.yaml` in this repo is a one-click Render blueprint for the actual
+Express + SQLite app in `src/` — the real shared backend, not the
+localStorage demo below. Click the button, sign in with GitHub (no credit
+card needed for Render's free web-service plan at time of writing — verify
+current terms at signup), and it deploys straight from this repo. Two
+honest limits of the free plan worth knowing: the disk is ephemeral, so
+data resets on every redeploy or restart, and the service spins down after
+15 minutes idle and takes ~30 seconds to wake back up on the next request.
+Fine for a demo anyone can reach; for real persistence, swap in a managed
+Postgres/SQLite service (e.g. Render's paid disks, or Turso) later.
+
 ## Live demo (static build)
 
 **https://samuel8m.github.io/HandyNeighbors-Marketplace/**
