@@ -78,6 +78,8 @@ docs/
 
 ## Live demo (static build)
 
+**https://samuel8m.github.io/HandyNeighbors-Marketplace/**
+
 `docs/` is a separate, self-contained build of the same UI for GitHub Pages,
 which only serves static files and can't run the Express/SQLite backend
 above. It's the same HTML/CSS, with `app.js` rewritten to read and write
