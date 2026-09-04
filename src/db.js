@@ -16,11 +16,26 @@ const SKILLS = [
   'Lock & Deadbolt Installation',
 ];
 
+// Grouped by type so the "post a listing" form and worker cards can show
+// *what kind* of equipment someone has (access/transport vs. power tools vs.
+// diagnostic gear), not just a flat tag cloud.
 const EQUIPMENT = [
-  'Ladder', 'Drill/Driver Set', 'Drain Snake', 'Multimeter', 'Stud Finder',
-  'Circular Saw', 'Miter Saw', 'Pressure Washer', 'Truck/Van', 'Tile Saw',
-  'Wet/Dry Vacuum', 'Nail Gun', 'Sander', 'Caulk Gun', 'Level Set',
-  'Pipe Wrench Set',
+  { name: 'Ladder', category: 'Access & Transport' },
+  { name: 'Truck/Van', category: 'Access & Transport' },
+  { name: 'Drill/Driver Set', category: 'Power Tools' },
+  { name: 'Circular Saw', category: 'Power Tools' },
+  { name: 'Miter Saw', category: 'Power Tools' },
+  { name: 'Tile Saw', category: 'Power Tools' },
+  { name: 'Nail Gun', category: 'Power Tools' },
+  { name: 'Sander', category: 'Power Tools' },
+  { name: 'Drain Snake', category: 'Diagnostic & Specialty' },
+  { name: 'Multimeter', category: 'Diagnostic & Specialty' },
+  { name: 'Stud Finder', category: 'Diagnostic & Specialty' },
+  { name: 'Pipe Wrench Set', category: 'Diagnostic & Specialty' },
+  { name: 'Pressure Washer', category: 'General & Finishing' },
+  { name: 'Wet/Dry Vacuum', category: 'General & Finishing' },
+  { name: 'Caulk Gun', category: 'General & Finishing' },
+  { name: 'Level Set', category: 'General & Finishing' },
 ];
 
 function slugify(text) {
@@ -49,7 +64,8 @@ function createDb(filePath) {
     CREATE TABLE IF NOT EXISTS equipment (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       slug TEXT NOT NULL UNIQUE,
-      name TEXT NOT NULL
+      name TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT ''
     );
 
     -- One row per individual worker. No "company" field on purpose: the
@@ -96,18 +112,36 @@ function createDb(filePath) {
     CREATE INDEX IF NOT EXISTS idx_reviews_worker ON reviews(worker_id);
   `);
 
-  seedLookupTable(db, 'skills', SKILLS);
-  seedLookupTable(db, 'equipment', EQUIPMENT);
+  migrateEquipmentCategory(db);
+  seedSkills(db);
+  seedEquipment(db);
 
   return db;
 }
 
-function seedLookupTable(db, table, names) {
-  const insert = db.prepare(`INSERT OR IGNORE INTO ${table} (slug, name) VALUES (?, ?)`);
+// Databases created before equipment categories existed won't have the
+// column yet — add it rather than forcing anyone to delete their data file.
+function migrateEquipmentCategory(db) {
+  const columns = db.prepare('PRAGMA table_info(equipment)').all();
+  if (columns.length > 0 && !columns.some((c) => c.name === 'category')) {
+    db.exec("ALTER TABLE equipment ADD COLUMN category TEXT NOT NULL DEFAULT ''");
+  }
+}
+
+function seedSkills(db) {
+  const insert = db.prepare('INSERT OR IGNORE INTO skills (slug, name) VALUES (?, ?)');
   const insertAll = db.transaction((items) => {
     for (const name of items) insert.run(slugify(name), name);
   });
-  insertAll(names);
+  insertAll(SKILLS);
+}
+
+function seedEquipment(db) {
+  const insert = db.prepare('INSERT INTO equipment (slug, name, category) VALUES (?, ?, ?) ON CONFLICT(slug) DO UPDATE SET category = excluded.category');
+  const insertAll = db.transaction((items) => {
+    for (const item of items) insert.run(slugify(item.name), item.name, item.category);
+  });
+  insertAll(EQUIPMENT);
 }
 
 module.exports = { createDb, slugify, SKILLS, EQUIPMENT };

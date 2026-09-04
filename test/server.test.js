@@ -67,6 +67,22 @@ test('GET /api/skills and /api/equipment return seeded lists', async () => {
   }
 });
 
+test('GET /api/cities aggregates listings once workers exist', async () => {
+  const { server, baseUrl } = startServer();
+  try {
+    await request(baseUrl, 'POST', '/api/workers', samplePayload({ city: 'Pittsburgh', state: 'PA' }));
+    await request(baseUrl, 'POST', '/api/workers', samplePayload({ name: 'Second Worker', city: 'Pittsburgh', state: 'PA' }));
+
+    const { status, body } = await request(baseUrl, 'GET', '/api/cities');
+    assert.equal(status, 200);
+    assert.equal(body.length, 1);
+    assert.equal(body[0].city, 'Pittsburgh');
+    assert.equal(body[0].workerCount, 2);
+  } finally {
+    server.close();
+  }
+});
+
 test('full worker lifecycle: create, search, price-check, review, update, delete', async () => {
   const { server, baseUrl } = startServer();
   try {

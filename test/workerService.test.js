@@ -26,6 +26,13 @@ function baseWorker(overrides = {}) {
   };
 }
 
+test('listEquipment includes each item\'s category', () => {
+  const db = freshDb();
+  const equipment = svc.listEquipment(db);
+  const ladder = equipment.find((e) => e.slug === 'ladder');
+  assert.equal(ladder.category, 'Access & Transport');
+});
+
 test('createWorker stores a profile and returns a one-time edit token', () => {
   const db = freshDb();
   const { worker, editToken } = svc.createWorker(db, baseWorker());
@@ -87,6 +94,37 @@ test('searchWorkers filters by skill, city, and rate range', () => {
 
   const byRate = svc.searchWorkers(db, { maxRate: 50 });
   assert.deepEqual(byRate.map((w) => w.name).sort(), ['Cheap Chris', 'Out of Towner']);
+});
+
+test('searchWorkers sorts by rate and rating', () => {
+  const db = freshDb();
+  svc.createWorker(db, baseWorker({ name: 'Mid', hourlyRate: 50 }));
+  svc.createWorker(db, baseWorker({ name: 'Low', hourlyRate: 20 }));
+  svc.createWorker(db, baseWorker({ name: 'High', hourlyRate: 80 }));
+
+  const ascending = svc.searchWorkers(db, { sortBy: 'rate_asc' });
+  assert.deepEqual(ascending.map((w) => w.name), ['Low', 'Mid', 'High']);
+
+  const descending = svc.searchWorkers(db, { sortBy: 'rate_desc' });
+  assert.deepEqual(descending.map((w) => w.name), ['High', 'Mid', 'Low']);
+
+  const [low] = svc.searchWorkers(db, { sortBy: 'rate_asc' });
+  svc.addReview(db, low.id, { authorName: 'Fan', rating: 5 });
+  const byRating = svc.searchWorkers(db, { sortBy: 'rating_desc' });
+  assert.equal(byRating[0].name, 'Low');
+});
+
+test('listCities aggregates worker count and average rate per city', () => {
+  const db = freshDb();
+  svc.createWorker(db, baseWorker({ name: 'A', hourlyRate: 40, city: 'Pittsburgh', state: 'PA' }));
+  svc.createWorker(db, baseWorker({ name: 'B', hourlyRate: 60, city: 'Pittsburgh', state: 'PA' }));
+  svc.createWorker(db, baseWorker({ name: 'C', hourlyRate: 30, city: 'Cleveland', state: 'OH' }));
+
+  const cities = svc.listCities(db);
+  assert.deepEqual(cities.map((c) => `${c.city}, ${c.state}`), ['Pittsburgh, PA', 'Cleveland, OH']);
+  const pittsburgh = cities.find((c) => c.city === 'Pittsburgh');
+  assert.equal(pittsburgh.workerCount, 2);
+  assert.equal(pittsburgh.averageRate, 50);
 });
 
 test('updateWorker requires a valid edit token', () => {

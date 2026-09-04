@@ -67,7 +67,18 @@ function listSkills(db) {
 }
 
 function listEquipment(db) {
-  return db.prepare('SELECT slug, name FROM equipment ORDER BY name').all();
+  return db.prepare('SELECT slug, name, category FROM equipment ORDER BY category, name').all();
+}
+
+// Powers "browse by city": every distinct city/state that has at least one
+// active listing, with a headcount and average rate, most-listings-first.
+function listCities(db) {
+  return db.prepare(`
+    SELECT city, state, COUNT(*) AS workerCount, ROUND(AVG(hourly_rate), 2) AS averageRate
+    FROM workers
+    GROUP BY LOWER(city), LOWER(state)
+    ORDER BY workerCount DESC, city ASC
+  `).all();
 }
 
 function validateWorkerInput(db, input) {
@@ -142,8 +153,8 @@ function attachTagsAndRating(db, worker) {
     JOIN skills s ON s.id = ws.skill_id WHERE ws.worker_id = ? ORDER BY s.name
   `).all(worker.id);
   const equipment = db.prepare(`
-    SELECT e.slug, e.name FROM worker_equipment we
-    JOIN equipment e ON e.id = we.equipment_id WHERE we.worker_id = ? ORDER BY e.name
+    SELECT e.slug, e.name, e.category FROM worker_equipment we
+    JOIN equipment e ON e.id = we.equipment_id WHERE we.worker_id = ? ORDER BY e.category, e.name
   `).all(worker.id);
   const ratingRow = db.prepare('SELECT AVG(rating) AS avg, COUNT(*) AS count FROM reviews WHERE worker_id = ?').get(worker.id);
 
@@ -211,7 +222,21 @@ function searchWorkers(db, filters = {}) {
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const rows = db.prepare(`SELECT w.* FROM workers w ${where} ORDER BY w.created_at DESC`).all(params);
-  return rows.map((row) => attachTagsAndRating(db, row));
+  const workers = rows.map((row) => attachTagsAndRating(db, row));
+
+  return sortWorkers(workers, filters.sortBy);
+}
+
+const SORTERS = {
+  newest: null, // already the SQL order
+  rate_asc: (a, b) => a.hourlyRate - b.hourlyRate,
+  rate_desc: (a, b) => b.hourlyRate - a.hourlyRate,
+  rating_desc: (a, b) => (b.rating ?? -1) - (a.rating ?? -1),
+};
+
+function sortWorkers(workers, sortBy) {
+  const sorter = SORTERS[sortBy];
+  return sorter ? [...workers].sort(sorter) : workers;
 }
 
 function verifyEditToken(db, workerId, providedToken) {
@@ -329,6 +354,7 @@ module.exports = {
   WorkerServiceError,
   listSkills,
   listEquipment,
+  listCities,
   createWorker,
   getWorker,
   searchWorkers,

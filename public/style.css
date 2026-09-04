@@ -10,6 +10,8 @@
   --border: #e6ddcf;
   --error: #b91c1c;
   --success: #1a7a4c;
+  --equip: #2f6690;
+  --equip-soft: #e4eef5;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -24,6 +26,8 @@
     --border: #392f22;
     --error: #f87171;
     --success: #4ade80;
+    --equip: #7fb1d6;
+    --equip-soft: #1c2e3a;
   }
 }
 
@@ -214,6 +218,16 @@ textarea { resize: vertical; }
   gap: 0.5rem 1rem;
 }
 
+.tag-group + .tag-group { margin-top: 0.75rem; }
+
+.tag-group-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 0.4rem;
+}
+
 .tag-checks label {
   font-weight: 400;
   color: var(--text);
@@ -224,6 +238,49 @@ textarea { resize: vertical; }
 }
 
 /* ---------- Results ---------- */
+
+/* ---------- Browse by city ---------- */
+
+.city-browser { margin-bottom: 1.5rem; }
+
+.section-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+}
+
+.city-chips { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+.empty-note-inline { color: var(--muted); font-size: 0.85rem; margin: 0; }
+
+.city-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.city-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+.city-chip.is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.city-chip-count { color: var(--muted); font-weight: 400; }
+.city-chip.is-active .city-chip-count { color: var(--accent); }
 
 .results-summary { color: var(--muted); margin: 0 0 0.75rem; font-size: 0.9rem; }
 
@@ -276,6 +333,20 @@ textarea { resize: vertical; }
   background: var(--bg);
   color: var(--muted);
   border: 1px solid var(--border);
+}
+
+.pill-equipment {
+  background: var(--equip-soft);
+  color: var(--equip);
+}
+
+.card-section-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  margin: 0.2rem 0 -0.15rem;
 }
 
 .rating-row { font-size: 0.85rem; color: var(--muted); }

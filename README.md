@@ -27,6 +27,17 @@ HandyNeighbors is deliberately narrow instead:
   listed rate for a skill (optionally narrowed to a city/state) into a
   low/median/average/high, so both sides can see if a rate is in line with
   the local market — something none of the incumbents expose.
+- **Built around city, not just as a filter field.** The Find tab opens on
+  a row of city chips (headcount + average rate per city, from
+  `/api/cities`) so browsing starts local by default, the way the actual
+  demand for a handyman is local; picking one narrows search and updates
+  the URL so a specific city's results are a shareable link.
+- **Equipment is typed, not a flat tag cloud.** Every equipment item belongs
+  to a category (Access & Transport, Power Tools, Diagnostic & Specialty,
+  General & Finishing) seeded in `src/db.js`. The post form groups
+  checkboxes by category, and both search cards and a worker's profile show
+  equipment grouped the same way — so "does this person have a truck" reads
+  at a glance instead of getting lost among sixteen tags.
 - **Never touches money.** The platform stores no payment info and runs no
   escrow. Contact info is shown on a worker's profile and the job (and the
   payment) is arranged directly between the two people. That keeps
@@ -78,9 +89,10 @@ creates a SQLite file at `data/handyneighbors.db` on first run.
 | Method | Path                          | Description |
 |--------|--------------------------------|--------------|
 | GET    | `/api/skills`                  | The fixed list of handyman skills (slug + name). |
-| GET    | `/api/equipment`                | The fixed list of equipment tags. |
+| GET    | `/api/equipment`                | The fixed list of equipment tags, each with a `category`. |
+| GET    | `/api/cities`                   | Every city/state with at least one listing: `workerCount` and `averageRate`, most-active-first. Powers the "Browse by City" strip. |
 | POST   | `/api/workers`                  | Create a listing. Returns `{ worker, editToken }` — the token is shown once. |
-| GET    | `/api/workers`                  | Search. Query params: `skill`, `equipment`, `city`, `state`, `minRate`, `maxRate`, `q`. |
+| GET    | `/api/workers`                  | Search. Query params: `skill`, `equipment`, `city`, `state`, `minRate`, `maxRate`, `q`, `sortBy` (`newest` \| `rate_asc` \| `rate_desc` \| `rating_desc`). |
 | GET    | `/api/workers/:id`              | One worker's full profile, including skills, equipment, and rating. |
 | PUT    | `/api/workers/:id`               | Update a listing. Requires header `X-Edit-Token`. |
 | DELETE | `/api/workers/:id`               | Remove a listing. Requires header `X-Edit-Token`. |
@@ -95,10 +107,11 @@ creates a SQLite file at `data/handyneighbors.db` on first run.
 npm test
 ```
 
-17 tests: service-level unit tests against an in-memory database (validation,
-search filters, price-matching math, edit-token enforcement), plus HTTP
-integration tests exercising the full create → search → price-check →
-review → update → delete lifecycle through a real Express server.
+21 tests: service-level unit tests against an in-memory database (validation,
+search filters and sorting, city aggregation, price-matching math,
+edit-token enforcement), plus HTTP integration tests exercising the full
+create → search → price-check → review → update → delete lifecycle through
+a real Express server.
 
 ## Design notes / trade-offs
 
@@ -126,7 +139,18 @@ review → update → delete lifecycle through a real Express server.
   price-matching engine both depend on every worker picking from the same
   list of skills and equipment (seeded in `src/db.js`). Free-text tags
   would fragment ("faucet fix" vs "fix a faucet") and make both search and
-  price aggregation unreliable.
+  price aggregation unreliable. Equipment additionally carries a
+  `category` column so the vocabulary stays browsable as it grows — a flat
+  list of 16 checkboxes is already borderline; grouped, it scales past 40
+  or 50 without becoming a wall of text.
+- **City aggregation lives in SQL, sorting doesn't.** `/api/cities` is a
+  single `GROUP BY` query — cheap and correct at any size. Search results,
+  by contrast, are sorted in JS after fetching (`newest` — the SQL order —
+  is free; `rate_asc`/`rate_desc`/`rating_desc` re-sort the already-small
+  result set). Rating in particular is computed per-worker from the
+  `reviews` table, not stored on `workers`, so it isn't available to an SQL
+  `ORDER BY` without a join+aggregate on every search; fine at this scale,
+  worth revisiting if result sets ever get large.
 - **SQLite over Postgres/Mongo**: this is a single-process, portfolio-scale
   app — `better-sqlite3` gives a real relational database with zero
   external services to install or configure, while still exercising SQL,

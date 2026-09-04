@@ -31,6 +31,11 @@
         <p>Every listing is one independent person — their own skills, their own tools, their own hourly rate. Free to browse, free to post, no fees, no middlemen.</p>
       </div>
 
+      <div class="city-browser">
+        <h2 class="section-label">Browse by city</h2>
+        <div id="city-chips" class="city-chips"><p class="empty-note-inline">No listings yet — post the first one and your city shows up here.</p></div>
+      </div>
+
       <form id="search-form" class="panel search-form">
         <div class="field">
           <label for="search-skill">Skill</label>
@@ -59,6 +64,15 @@
         <div class="field field-grow">
           <label for="search-q">Search name or bio</label>
           <input id="search-q" name="q" type="text" placeholder="e.g. drywall, sinks, decks" />
+        </div>
+        <div class="field">
+          <label for="search-sort">Sort by</label>
+          <select id="search-sort" name="sortBy">
+            <option value="newest">Newest</option>
+            <option value="rate_asc">Rate: low to high</option>
+            <option value="rate_desc">Rate: high to low</option>
+            <option value="rating_desc">Top rated</option>
+          </select>
         </div>
         <div class="field field-actions">
           <button type="submit" class="btn btn-primary">Search</button>

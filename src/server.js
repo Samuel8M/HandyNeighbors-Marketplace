@@ -32,6 +32,12 @@ function createApp(db) {
     res.json(svc.listEquipment(db));
   });
 
+  // Powers "Browse by City": every city/state with at least one listing,
+  // with a headcount and average rate, most-active-first.
+  app.get('/api/cities', (req, res) => {
+    res.json(svc.listCities(db));
+  });
+
   // Free to post, no account required: a worker gets back an edit token
   // once, at creation time, and must hold onto it to edit or remove the
   // listing later. HandyNeighbors never touches payment — contact info is
