@@ -52,9 +52,9 @@ HandyNeighbors is deliberately narrow instead:
 
 | Layer      | Choice                                      |
 |------------|----------------------------------------------|
-| Runtime    | Node.js (>=18)                               |
+| Runtime    | Node.js (>=22.13)                            |
 | Server     | Express                                      |
-| Database   | SQLite via `better-sqlite3` (file-based, zero setup, synchronous API) |
+| Database   | SQLite via Node's built-in `node:sqlite` (`DatabaseSync`) — no separate native dependency |
 | Frontend   | Static HTML/CSS/vanilla JS (no build tooling, no CDN dependencies) |
 | Testing    | Node's built-in `node:test` + `node:assert`  |
 
@@ -91,14 +91,20 @@ data resets on every redeploy or restart, and the service spins down after
 Fine for a demo anyone can reach; for real persistence, swap in a managed
 Postgres/SQLite service (e.g. Render's paid disks, or Turso) later.
 
-`.npmrc` in this repo sets `build-from-source=true` — without it,
-`better-sqlite3`'s prebuilt native binary segfaulted immediately on start
-on Render's runtime (`Segmentation fault (core dumped)`, exit 139), even
-on a clean `npm install` with no cache involved. Forcing a from-source
-build via `node-gyp` on the target machine avoids shipping a binary built
-for a different environment. This costs a slightly longer first build and
-is worth keeping if this ever moves to another host with the same
-symptom.
+**Why this runs on `node:sqlite` instead of `better-sqlite3`:** the first
+deploy attempt segfaulted immediately on start (`Segmentation fault (core
+dumped)`, exit 139) — every time, on every Node version and cache state
+tried. A plain Node process with no database code ran fine on the same
+Render instance, which isolated it conclusively to `better-sqlite3`'s
+compiled native binary being incompatible with that specific host,
+regardless of whether it came from a prebuilt download or a from-source
+`node-gyp` build. Since `node:sqlite` (`DatabaseSync`) is compiled and
+shipped by the Node project itself as part of the Node binary — no
+separate native artifact to mismatch the host — switching to it removed
+the problem at the root instead of continuing to chase environment-specific
+binary theories. See `src/db.js` for the migration notes, including the
+one real behavioral difference from `better-sqlite3` (no `.transaction()`
+helper; `db.js` exports a small `withTransaction()` in its place).
 
 ## Live demo (static build)
 
@@ -192,9 +198,9 @@ a real Express server.
   `ORDER BY` without a join+aggregate on every search; fine at this scale,
   worth revisiting if result sets ever get large.
 - **SQLite over Postgres/Mongo**: this is a single-process, portfolio-scale
-  app — `better-sqlite3` gives a real relational database with zero
-  external services to install or configure, while still exercising SQL,
-  indexes, and foreign keys.
+  app — `node:sqlite` gives a real relational database with zero external
+  services and zero extra dependencies to install or configure, while
+  still exercising SQL, indexes, and foreign keys.
 - **No ads, no CDN scripts.** The whole frontend is inline-dependency-free
   HTML/CSS/vanilla JS served straight out of `public/` — nothing to build,
   bundle, or fetch from a third party. Monetization (ads) is explicitly

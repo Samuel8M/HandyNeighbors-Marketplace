@@ -1,6 +1,6 @@
 'use strict';
 
-const Database = require('better-sqlite3');
+const { DatabaseSync } = require('node:sqlite');
 
 // Curated so the whole platform stays inside the "handyman" lane — tasks
 // that don't require a state trade license. Keeping this list fixed (rather
@@ -43,22 +43,53 @@ function slugify(text) {
 }
 
 /**
+ * Runs fn inside a transaction, committing on success and rolling back if
+ * it throws. node:sqlite's DatabaseSync has no `.transaction()` helper
+ * (unlike better-sqlite3), so this is the equivalent: explicit BEGIN,
+ * COMMIT on success, ROLLBACK (then rethrow) on failure.
+ *
+ * @param {import('node:sqlite').DatabaseSync} db
+ * @param {() => T} fn
+ * @returns {T}
+ * @template T
+ */
+function withTransaction(db, fn) {
+  db.exec('BEGIN');
+  try {
+    const result = fn();
+    db.exec('COMMIT');
+    return result;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+/**
  * Opens (and initializes if needed) a SQLite database at the given path.
  * Pass ':memory:' for an ephemeral in-memory database (used in tests).
  *
+ * Uses Node's built-in node:sqlite (DatabaseSync) rather than
+ * better-sqlite3. They were dropped for the same reason: better-sqlite3
+ * ships a separately-compiled native binary, and it segfaulted
+ * (uncatchably — a native crash, not a JS exception) immediately on start
+ * on Render specifically, while an equivalent plain-Node process on the
+ * same host ran fine. node:sqlite is compiled and shipped by the Node
+ * project itself as part of the Node binary, so there's no separate
+ * native artifact that can mismatch the host. Requires Node >=22.13 (no
+ * flag needed from that version on; see the `engines` field below).
+ *
  * @param {string} filePath
- * @returns {import('better-sqlite3').Database}
+ * @returns {import('node:sqlite').DatabaseSync}
  */
 function createDb(filePath) {
-  const db = new Database(filePath);
-  // Not WAL: WAL mode backs its shared-memory index with mmap, which some
-  // hosts' ephemeral/overlay filesystems don't support cleanly — it
-  // reproduced as an immediate, uncatchable native segfault on Render
-  // (mmap failures inside SQLite's C code crash the process; they can't be
-  // caught with a JS try/catch). The default rollback journal never
+  const db = new DatabaseSync(filePath);
+  // No WAL pragma here on purpose — see the git history for why (it once
+  // relied on mmap-backed shared memory that some hosts' ephemeral/overlay
+  // filesystems don't support cleanly). The default rollback journal never
   // touches mmap and is plenty for this app's single-instance, low-write
   // scale.
-  db.pragma('foreign_keys = ON');
+  db.exec('PRAGMA foreign_keys = ON');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS skills (
@@ -136,18 +167,16 @@ function migrateEquipmentCategory(db) {
 
 function seedSkills(db) {
   const insert = db.prepare('INSERT OR IGNORE INTO skills (slug, name) VALUES (?, ?)');
-  const insertAll = db.transaction((items) => {
-    for (const name of items) insert.run(slugify(name), name);
+  withTransaction(db, () => {
+    for (const name of SKILLS) insert.run(slugify(name), name);
   });
-  insertAll(SKILLS);
 }
 
 function seedEquipment(db) {
   const insert = db.prepare('INSERT INTO equipment (slug, name, category) VALUES (?, ?, ?) ON CONFLICT(slug) DO UPDATE SET category = excluded.category');
-  const insertAll = db.transaction((items) => {
-    for (const item of items) insert.run(slugify(item.name), item.name, item.category);
+  withTransaction(db, () => {
+    for (const item of EQUIPMENT) insert.run(slugify(item.name), item.name, item.category);
   });
-  insertAll(EQUIPMENT);
 }
 
-module.exports = { createDb, slugify, SKILLS, EQUIPMENT };
+module.exports = { createDb, slugify, withTransaction, SKILLS, EQUIPMENT };

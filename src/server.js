@@ -12,7 +12,7 @@ const { WorkerServiceError } = svc;
  * Separated from bootstrap() so tests can build an app around an
  * in-memory DB.
  *
- * @param {import('better-sqlite3').Database} db
+ * @param {import('node:sqlite').DatabaseSync} db
  */
 function createApp(db) {
   const app = express();

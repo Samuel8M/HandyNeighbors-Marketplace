@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const { slugify } = require('./db');
+const { slugify, withTransaction } = require('./db');
 
 class WorkerServiceError extends Error {
   constructor(status, message) {
@@ -127,7 +127,7 @@ function createWorker(db, input) {
   const insertSkill = db.prepare('INSERT INTO worker_skills (worker_id, skill_id) VALUES (?, ?)');
   const insertEquipment = db.prepare('INSERT INTO worker_equipment (worker_id, equipment_id) VALUES (?, ?)');
 
-  const workerId = db.transaction(() => {
+  const workerId = withTransaction(db, () => {
     const info = insertWorker.run({
       name: data.name,
       bio: data.bio,
@@ -142,7 +142,7 @@ function createWorker(db, input) {
     for (const skillId of data.skillIds) insertSkill.run(info.lastInsertRowid, skillId);
     for (const equipmentId of data.equipmentIds) insertEquipment.run(info.lastInsertRowid, equipmentId);
     return info.lastInsertRowid;
-  })();
+  });
 
   return { worker: getWorker(db, workerId), editToken };
 }
@@ -251,13 +251,27 @@ function updateWorker(db, workerId, editToken, input) {
   verifyEditToken(db, workerId, editToken);
   const data = validateWorkerInput(db, input);
 
-  db.transaction(() => {
+  withTransaction(db, () => {
+    // node:sqlite (unlike better-sqlite3) throws on a named-params object
+    // that carries keys the SQL doesn't reference, so this lists exactly
+    // the columns the UPDATE uses rather than spreading all of `data`
+    // (which also carries skillIds/equipmentIds).
     db.prepare(`
       UPDATE workers SET name=@name, bio=@bio, hourly_rate=@hourlyRate, city=@city, state=@state,
         service_radius_miles=@serviceRadiusMiles, contact_email=@contactEmail, contact_phone=@contactPhone,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE id=@id
-    `).run({ ...data, contactEmail: data.contactEmail || null, contactPhone: data.contactPhone || null, id: workerId });
+    `).run({
+      name: data.name,
+      bio: data.bio,
+      hourlyRate: data.hourlyRate,
+      city: data.city,
+      state: data.state,
+      serviceRadiusMiles: data.serviceRadiusMiles,
+      contactEmail: data.contactEmail || null,
+      contactPhone: data.contactPhone || null,
+      id: workerId,
+    });
 
     db.prepare('DELETE FROM worker_skills WHERE worker_id = ?').run(workerId);
     db.prepare('DELETE FROM worker_equipment WHERE worker_id = ?').run(workerId);
@@ -265,7 +279,7 @@ function updateWorker(db, workerId, editToken, input) {
     const insertEquipment = db.prepare('INSERT INTO worker_equipment (worker_id, equipment_id) VALUES (?, ?)');
     for (const skillId of data.skillIds) insertSkill.run(workerId, skillId);
     for (const equipmentId of data.equipmentIds) insertEquipment.run(workerId, equipmentId);
-  })();
+  });
 
   return getWorker(db, workerId);
 }
