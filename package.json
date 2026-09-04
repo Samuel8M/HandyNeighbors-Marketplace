@@ -1,0 +1,21 @@
+{
+  "name": "handyneighbors",
+  "version": "1.0.0",
+  "description": "A free, ad-free marketplace where individual handymen list their skills, equipment, and hourly rate, and neighbors compare local prices before hiring.",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "author": "Samuel McMillan",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^4.21.0"
+  }
+}
