@@ -423,11 +423,20 @@ textarea { resize: vertical; }
   position: fixed;
   inset: 0;
   background: rgba(20, 16, 10, 0.55);
+  padding: 1.5rem;
+  z-index: 100;
+}
+
+/* `display: flex` only applies while the backdrop is shown. A bare
+   `.modal-backdrop { display: flex }` would tie in specificity with the
+   browser's own `[hidden] { display: none }` rule, and the later-loaded
+   author rule wins that tie — so the modal would stay visible (and
+   un-closeable, since closing just re-sets the [hidden] attribute) even
+   while hidden. */
+.modal-backdrop:not([hidden]) {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1.5rem;
-  z-index: 100;
 }
 
 .modal {
