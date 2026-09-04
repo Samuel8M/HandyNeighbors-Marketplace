@@ -51,7 +51,13 @@ function slugify(text) {
  */
 function createDb(filePath) {
   const db = new Database(filePath);
-  db.pragma('journal_mode = WAL');
+  // Not WAL: WAL mode backs its shared-memory index with mmap, which some
+  // hosts' ephemeral/overlay filesystems don't support cleanly — it
+  // reproduced as an immediate, uncatchable native segfault on Render
+  // (mmap failures inside SQLite's C code crash the process; they can't be
+  // caught with a JS try/catch). The default rollback journal never
+  // touches mmap and is plenty for this app's single-instance, low-write
+  // scale.
   db.pragma('foreign_keys = ON');
 
   db.exec(`
