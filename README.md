@@ -109,9 +109,14 @@ link back directly (clearly marked `mode: "dev-log"`) and the frontend
 offers to verify the account with it right there, so the whole flow stays
 testable without a connected email account. Set `RESEND_API_KEY` (and
 optionally `EMAIL_FROM`) to send real email through
-[Resend](https://resend.com) — see `src/emailSender.js`; that integration
-follows Resend's documented API but hasn't been exercised against a real
-account in this environment, so test it before relying on it.
+[Resend](https://resend.com) — see `src/emailSender.js`. This live
+deployment has one configured, and delivery is confirmed working
+end-to-end (signup → real email → click → verified). Two things worth
+knowing about the unverified default sender (`onboarding@resend.dev`):
+it lands in spam more often than a verified domain would, and per
+Resend's anti-spam rules it can only deliver to the email address the
+Resend *account itself* is registered with — not arbitrary signups.
+Verifying your own domain in Resend removes both limits.
 
 **Why this runs on `node:sqlite` instead of `better-sqlite3`:** the first
 deploy attempt segfaulted immediately on start (`Segmentation fault (core

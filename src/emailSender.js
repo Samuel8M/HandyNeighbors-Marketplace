@@ -10,11 +10,14 @@
 // optionally EMAIL_FROM) as environment variables.
 //
 // The Resend integration below follows Resend's documented API
-// (https://resend.com/docs/api-reference/emails/send-email), but it has
-// not been exercised against a real Resend account in this environment —
-// no API key was available to test with. Verify it with a real key
-// before relying on it, and check Resend's current docs if it doesn't
-// behave as expected; API contracts can change after this was written.
+// (https://resend.com/docs/api-reference/emails/send-email) and has been
+// confirmed working end-to-end against a real Resend account: signup ->
+// real email delivered -> click -> account verified. Two limits of an
+// unverified sender domain (the default here, onboarding@resend.dev) are
+// worth knowing: mail lands in spam more often than from a verified
+// domain, and Resend's anti-spam rules only let it deliver to the email
+// address the Resend account itself is registered with, not arbitrary
+// signups. Verifying your own domain in Resend removes both.
 function createEmailSender() {
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM || 'HandyNeighbors <onboarding@resend.dev>';
