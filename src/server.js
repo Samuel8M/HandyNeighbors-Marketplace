@@ -114,6 +114,12 @@ function createApp(db, options = {}) {
 
   app.use(securityHeaders);
   app.use(express.json());
+  // Mounted separately (not just left to the plain static() below) because
+  // express.static defaults to ignoring any path with a dotfile segment —
+  // '.well-known' would 404 otherwise. Needed for assetlinks.json, which
+  // proves this site authorizes the Android app (see android/README.md)
+  // to open its links without a browser address bar.
+  app.use('/.well-known', express.static(path.join(__dirname, '..', 'public', '.well-known')));
   app.use(express.static(path.join(__dirname, '..', 'public')));
 
   // Resolves the session cookie (if any) into req.user for every route.

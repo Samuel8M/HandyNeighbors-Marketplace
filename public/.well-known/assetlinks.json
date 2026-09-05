@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.handyneighbors.app",
+      "sha256_cert_fingerprints": [
+        "C6:E1:2A:02:ED:E1:1B:89:86:77:5B:58:6E:F3:A3:06:A5:A7:05:A2:4E:DD:79:C9:32:38:4E:D6:46:9D:8F:71"
+      ]
+    }
+  }
+]

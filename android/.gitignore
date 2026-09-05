@@ -1,0 +1,23 @@
+# The signing key and its password are the permanent identity of this app
+# on the Play Store — losing them, or leaking them into this (public) repo,
+# is unrecoverable (Google ties app updates to this exact key). Keep this
+# file backed up somewhere private and durable; it is deliberately never
+# committed here.
+android.keystore
+*.jks
+keystore-password.txt
+
+# Build output — large, fully regenerable from source via ./gradlew.
+/build/
+/app/build/
+/.gradle/
+*.aab
+*.apk
+
+# Machine-specific (points at wherever the Android SDK happens to live on
+# this machine).
+local.properties
+
+# Installed here only to script project generation non-interactively —
+# see generate-project.js.
+node_modules/

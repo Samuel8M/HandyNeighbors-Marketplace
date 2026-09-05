@@ -92,6 +92,17 @@ test('GET /health returns ok', async () => {
   }
 });
 
+test('GET /.well-known/assetlinks.json is served (Android app link verification)', async () => {
+  const { server, baseUrl } = startServer();
+  try {
+    const { status, body } = await request(baseUrl, 'GET', '/.well-known/assetlinks.json');
+    assert.equal(status, 200);
+    assert.equal(body[0].target.package_name, 'com.handyneighbors.app');
+  } finally {
+    server.close();
+  }
+});
+
 test('GET /api/skills and /api/equipment return seeded lists', async () => {
   const { server, baseUrl } = startServer();
   try {
