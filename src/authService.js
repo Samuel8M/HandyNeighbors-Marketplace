@@ -62,12 +62,33 @@ function toPublicUser(row) {
     name: row.name,
     emailVerified: !!row.email_verified,
     memberSince: row.created_at,
+    isAdmin: !!row.is_admin,
+    bannedAt: row.banned_at || null,
   };
+}
+
+// Grants admin on the fly to any account whose email is listed in the
+// ADMIN_EMAILS env var (comma-separated, case-insensitive) — there's no API
+// path that sets is_admin, so this is the only way an account becomes an
+// admin. Runs on every session resolution/login, so listing (or removing)
+// an address there takes effect the next time that person is seen, no
+// matter whether their account already existed.
+function syncAdminFlag(db, row) {
+  if (row.is_admin) return row;
+  const adminEmails = String(process.env.ADMIN_EMAILS || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+  if (adminEmails.includes(row.email)) {
+    db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(row.id);
+    row.is_admin = 1;
+  }
+  return row;
 }
 
 function getPublicUser(db, userId) {
   const row = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
-  return row ? toPublicUser(row) : null;
+  return row ? toPublicUser(syncAdminFlag(db, row)) : null;
 }
 
 function createSession(db, userId) {
@@ -96,7 +117,7 @@ function resolveSession(db, sessionToken) {
     db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
     return null;
   }
-  return toPublicUser(row);
+  return toPublicUser(syncAdminFlag(db, row));
 }
 
 function destroySession(db, sessionToken) {
@@ -158,7 +179,7 @@ function login(db, { email, password }) {
     throw new AuthError(401, 'Incorrect email or password');
   }
   const session = createSession(db, row.id);
-  return { user: toPublicUser(row), session };
+  return { user: toPublicUser(syncAdminFlag(db, row)), session };
 }
 
 async function resendVerification(db, userId, sendVerificationEmail) {

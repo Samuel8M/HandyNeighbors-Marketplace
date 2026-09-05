@@ -284,6 +284,94 @@ test('DELETE /api/auth/me deletes the account and cascades to their listings', a
   }
 });
 
+test('reporting a listing: requires a verified account, blocks self-reports, and is admin-visible', async () => {
+  const { server, baseUrl, sendVerificationEmail } = startServer();
+  try {
+    const owner = await signUpAndVerify(baseUrl, sendVerificationEmail, { name: 'Owner Olive' });
+    const created = await request(baseUrl, 'POST', '/api/workers', { body: workerPayload(), cookie: owner.cookie });
+    const workerId = created.body.worker.id;
+
+    const anon = await request(baseUrl, 'POST', '/api/reports', {
+      body: { targetType: 'worker', targetId: workerId, reason: 'spam' },
+    });
+    assert.equal(anon.status, 401);
+
+    const selfReport = await request(baseUrl, 'POST', '/api/reports', {
+      body: { targetType: 'worker', targetId: workerId, reason: 'spam' }, cookie: owner.cookie,
+    });
+    assert.equal(selfReport.status, 400);
+
+    const reporter = await signUpAndVerify(baseUrl, sendVerificationEmail, { name: 'Reporter Rae' });
+    const report = await request(baseUrl, 'POST', '/api/reports', {
+      body: { targetType: 'worker', targetId: workerId, reason: 'inappropriate_content', details: 'Not cool' },
+      cookie: reporter.cookie,
+    });
+    assert.equal(report.status, 201);
+    assert.equal(report.body.status, 'open');
+
+    // Not an admin: the queue is invisible to them.
+    const deniedList = await request(baseUrl, 'GET', '/api/admin/reports', { cookie: reporter.cookie });
+    assert.equal(deniedList.status, 403);
+  } finally {
+    server.close();
+  }
+});
+
+test('admin routes: gated by ADMIN_EMAILS, and acting on a report can ban the listing owner', async () => {
+  const previousAdminEmails = process.env.ADMIN_EMAILS;
+  const { server, baseUrl, sendVerificationEmail } = startServer();
+  try {
+    const ownerPayload = signupPayload({ name: 'Owner Olive' });
+    process.env.ADMIN_EMAILS = ''; // owner signs up as a regular user first
+    const ownerSignup = await request(baseUrl, 'POST', '/api/auth/signup', { body: ownerPayload });
+    const ownerVerify = await request(baseUrl, 'GET', `/api/auth/verify-email?token=${new URL(ownerSignup.body.verification.verifyUrl).searchParams.get('token')}`);
+    const owner = { cookie: ownerSignup.cookie, user: ownerVerify.body.user };
+    const created = await request(baseUrl, 'POST', '/api/workers', { body: workerPayload(), cookie: owner.cookie });
+    const workerId = created.body.worker.id;
+
+    const adminPayload = signupPayload({ name: 'Admin Andy' });
+    process.env.ADMIN_EMAILS = adminPayload.email; // granted the moment they sign up
+    const adminSignup = await request(baseUrl, 'POST', '/api/auth/signup', { body: adminPayload });
+    assert.equal(adminSignup.body.user.isAdmin, true);
+    const adminCookie = adminSignup.cookie;
+
+    const reporter = await signUpAndVerify(baseUrl, sendVerificationEmail, { name: 'Reporter Rae' });
+    const report = await request(baseUrl, 'POST', '/api/reports', {
+      body: { targetType: 'worker', targetId: workerId, reason: 'scam_or_fraud' }, cookie: reporter.cookie,
+    });
+
+    const list = await request(baseUrl, 'GET', '/api/admin/reports?status=open', { cookie: adminCookie });
+    assert.equal(list.status, 200);
+    assert.equal(list.body.length, 1);
+
+    const action = await request(baseUrl, 'POST', `/api/admin/reports/${report.body.id}/action`, {
+      body: { action: 'ban_user' }, cookie: adminCookie,
+    });
+    assert.equal(action.status, 200);
+    assert.equal(action.body.status, 'actioned');
+
+    // The banned owner can no longer post a new listing…
+    const blockedPost = await request(baseUrl, 'POST', '/api/workers', {
+      body: workerPayload({ name: 'Second listing' }), cookie: owner.cookie,
+    });
+    assert.equal(blockedPost.status, 403);
+
+    // …until an admin unbans them.
+    const bannedList = await request(baseUrl, 'GET', '/api/admin/banned-users', { cookie: adminCookie });
+    assert.equal(bannedList.body.length, 1);
+    const unban = await request(baseUrl, 'POST', `/api/admin/banned-users/${bannedList.body[0].id}/unban`, { cookie: adminCookie });
+    assert.equal(unban.status, 204);
+
+    const allowedPost = await request(baseUrl, 'POST', '/api/workers', {
+      body: workerPayload({ name: 'Second listing' }), cookie: owner.cookie,
+    });
+    assert.equal(allowedPost.status, 201);
+  } finally {
+    process.env.ADMIN_EMAILS = previousAdminEmails;
+    server.close();
+  }
+});
+
 test('login is rate-limited after repeated attempts', async () => {
   const { server, baseUrl } = startServer();
   try {

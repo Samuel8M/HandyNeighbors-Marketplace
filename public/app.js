@@ -374,6 +374,80 @@
     }
   }
 
+  // ---------- Reporting content ----------
+  // Matches moderationService.REASONS on the server exactly — a fixed
+  // vocabulary rather than free text, so an admin's report queue stays
+  // scannable instead of becoming another pile of one-off strings.
+  const REPORT_REASONS = [
+    ['spam', 'Spam or advertising'],
+    ['scam_or_fraud', 'Scam or fraud'],
+    ['inappropriate_content', 'Inappropriate content'],
+    ['harassment', 'Harassment or abuse'],
+    ['fake_listing', "Fake listing (not a real person/service)"],
+    ['other', 'Other'],
+  ];
+
+  function reportTriggerHtml(targetType, targetId) {
+    return `<button type="button" class="link-btn report-trigger" data-report-type="${targetType}" data-report-id="${targetId}">Report</button>`;
+  }
+
+  function reportFormHtml(targetType, targetId) {
+    return `
+      <form class="report-form" data-report-type="${targetType}" data-report-id="${targetId}">
+        <div class="field">
+          <label>Why are you reporting this?</label>
+          <select name="reason" required>
+            <option value="" disabled selected>Choose a reason…</option>
+            ${REPORT_REASONS.map(([value, label]) => `<option value="${value}">${escapeHtml(label)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Details (optional)</label>
+          <textarea name="details" rows="2" maxlength="500"></textarea>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn btn-primary btn-sm">Submit report</button>
+          <button type="button" class="btn btn-ghost btn-sm report-cancel">Cancel</button>
+        </div>
+      </form>
+    `;
+  }
+
+  // Delegated once per modal render (rather than per-button) since review
+  // rows are re-rendered wholesale every time a review is added. Handles
+  // both the worker's own report trigger and one per review.
+  function wireReportLinks(root) {
+    root.addEventListener('click', async (e) => {
+      const trigger = e.target.closest('.report-trigger');
+      if (trigger) {
+        const { reportType, reportId } = trigger.dataset;
+        trigger.outerHTML = reportFormHtml(reportType, reportId);
+        return;
+      }
+      const cancel = e.target.closest('.report-cancel');
+      if (cancel) {
+        const form = cancel.closest('.report-form');
+        const { reportType, reportId } = form.dataset;
+        form.outerHTML = reportTriggerHtml(reportType, reportId);
+      }
+    });
+
+    root.addEventListener('submit', async (e) => {
+      const form = e.target.closest('.report-form');
+      if (!form) return;
+      e.preventDefault();
+      const { reportType, reportId } = form.dataset;
+      await withLoadingButton(form, 'Submitting…', async () => {
+        const data = Object.fromEntries(new FormData(form).entries());
+        await api('/api/reports', {
+          method: 'POST',
+          body: JSON.stringify({ targetType: reportType, targetId: Number(reportId), ...data }),
+        });
+        form.outerHTML = '<span class="field-hint">Reported — thanks, our team will take a look.</span>';
+      });
+    });
+  }
+
   function groupByCategory(items) {
     const map = new Map();
     for (const item of items) {
@@ -398,11 +472,13 @@
       w.contactEmail ? `<div>✉️ ${escapeHtml(w.contactEmail)}</div>` : '',
       w.contactPhone ? `<div>📞 ${escapeHtml(w.contactPhone)}</div>` : '',
     ].join('');
+    const canReport = state.currentUser && state.currentUser.emailVerified;
     const reviewItems = reviews.length
       ? reviews.map((r) => `
-          <li>
+          <li data-review-row="${r.id}">
             <strong>${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</strong>
             — ${escapeHtml(r.authorName)}${r.comment ? `: ${escapeHtml(r.comment)}` : ''}
+            ${canReport ? reportTriggerHtml('review', r.id) : ''}
           </li>
         `).join('')
       : '<li>No reviews yet.</li>';
@@ -455,6 +531,7 @@
       <ul class="review-list">${reviewItems}</ul>
       ${reviewSection}
 
+      ${!isOwner && canReport ? `<p data-report-row="worker:${w.id}" style="margin-top:1rem">${reportTriggerHtml('worker', w.id)}</p>` : ''}
       ${isOwner ? '<button type="button" id="delete-listing" class="btn btn-ghost" style="margin-top:1rem;color:var(--error);border-color:var(--error)">Remove my listing</button>' : ''}
     `;
   }
@@ -490,6 +567,11 @@
   function initModal() {
     wireModalDismiss('worker-modal', 'modal-close');
     wireModalDismiss('auth-modal', 'auth-modal-close', { closeOnBackdropClick: false });
+    // Delegated on the container once — it survives every re-render of
+    // #modal-body's innerHTML (a fresh worker load, a review just posted),
+    // so wiring it again per-render would stack duplicate handlers instead
+    // of replacing anything.
+    wireReportLinks($('#modal-body'));
   }
 
   // ---------- Auth ----------
@@ -510,6 +592,7 @@
     }
     area.innerHTML = `
       <span class="auth-user-chip">
+        ${state.currentUser.isAdmin ? '<a class="btn btn-ghost btn-sm" href="/admin.html">Admin</a>' : ''}
         <span class="auth-user-name">${escapeHtml(state.currentUser.name)}</span>
         <button type="button" class="btn btn-ghost btn-sm" id="nav-logout">Log out</button>
         <button type="button" class="btn btn-ghost btn-sm" id="nav-delete-account" title="Permanently delete your account, listings, and reviews">Delete account</button>

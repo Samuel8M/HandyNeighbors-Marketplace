@@ -117,7 +117,17 @@ function createDb(filePath) {
       verification_token_hash TEXT,
       verification_sent_at TEXT,
       accepted_terms_at TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      -- Granted automatically (see authService.syncAdminFlag) to any account
+      -- whose email appears in the ADMIN_EMAILS env var — never settable
+      -- through the API itself, so there's no "make myself admin" request
+      -- to defend against.
+      is_admin INTEGER NOT NULL DEFAULT 0,
+      -- Set by an admin acting on a report (moderationService.actOnReport).
+      -- A banned account keeps browsing/read access and can still delete
+      -- itself, but requireNotBanned blocks it from posting listings,
+      -- editing them, or leaving reviews.
+      banned_at TEXT
     );
 
     -- A session is a long random token handed to the browser as a cookie;
@@ -175,6 +185,23 @@ function createDb(filePath) {
       UNIQUE (worker_id, user_id)
     );
 
+    -- One row per person reporting a listing or review as violating the
+    -- platform's rules. Deliberately keeps its own lifecycle (open ->
+    -- dismissed/actioned) independent of the content it points at, so a
+    -- report survives even if an admin later deletes the reported content.
+    CREATE TABLE IF NOT EXISTS reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reporter_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      target_type TEXT NOT NULL CHECK (target_type IN ('worker', 'review')),
+      target_id INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      details TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'dismissed', 'actioned')),
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      resolved_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
     CREATE INDEX IF NOT EXISTS idx_worker_skills_skill ON worker_skills(skill_id);
     CREATE INDEX IF NOT EXISTS idx_worker_equipment_equipment ON worker_equipment(equipment_id);
     CREATE INDEX IF NOT EXISTS idx_workers_city_state ON workers(city, state);
@@ -190,6 +217,7 @@ function createDb(filePath) {
 
   migrateEquipmentCategory(db);
   migrateWorkersAndReviewsToAccounts(db);
+  migrateModerationColumns(db);
   seedSkills(db);
   seedEquipment(db);
 
@@ -236,6 +264,18 @@ function migrateWorkersAndReviewsToAccounts(db) {
   // safe to add even with many existing NULL-user_id rows.
   db.exec('CREATE INDEX IF NOT EXISTS idx_workers_user ON workers(user_id)');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_worker_user ON reviews(worker_id, user_id)');
+}
+
+// Databases created before moderation existed won't have these columns yet.
+function migrateModerationColumns(db) {
+  const columns = db.prepare('PRAGMA table_info(users)').all();
+  if (columns.length === 0) return;
+  if (!columns.some((c) => c.name === 'is_admin')) {
+    db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!columns.some((c) => c.name === 'banned_at')) {
+    db.exec('ALTER TABLE users ADD COLUMN banned_at TEXT');
+  }
 }
 
 function seedSkills(db) {

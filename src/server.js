@@ -6,9 +6,11 @@ const express = require('express');
 const { createDb } = require('./db');
 const svc = require('./workerService');
 const authSvc = require('./authService');
+const modSvc = require('./moderationService');
 const { createEmailSender } = require('./emailSender');
 const { WorkerServiceError } = svc;
 const { AuthError } = authSvc;
+const { ModerationError } = modSvc;
 
 const SESSION_COOKIE = 'hn_session';
 
@@ -144,6 +146,24 @@ function createApp(db, options = {}) {
     next();
   }
 
+  // Blocks an account an admin has actioned (see POST
+  // /api/admin/reports/:id/action) from creating more of the content that
+  // got it reported in the first place. Deliberately narrower than locking
+  // the account out entirely: banned users can still sign in, browse, and
+  // delete their own account (the right-to-erasure promise in the Privacy
+  // Policy applies to everyone, not just users in good standing).
+  function requireNotBanned(req, res, next) {
+    if (req.user.bannedAt) {
+      return res.status(403).json({ error: 'Your account has been suspended for violating our content policies.' });
+    }
+    next();
+  }
+
+  function requireAdmin(req, res, next) {
+    if (!req.user || !req.user.isAdmin) return res.status(403).json({ error: 'Admins only.' });
+    next();
+  }
+
   const authRateLimiter = createRateLimiter({
     windowMs: 15 * 60 * 1000,
     max: 20,
@@ -239,7 +259,7 @@ function createApp(db, options = {}) {
   // verified account, so a listing and its reviews are tied to a real,
   // (email-)verified person rather than anonymous free text.
 
-  app.post('/api/workers', requireAuth, requireVerified, (req, res, next) => {
+  app.post('/api/workers', requireAuth, requireVerified, requireNotBanned, (req, res, next) => {
     try {
       const worker = svc.createWorker(db, req.user.id, req.body || {});
       res.status(201).json({ worker });
@@ -264,7 +284,7 @@ function createApp(db, options = {}) {
     }
   });
 
-  app.put('/api/workers/:id', requireAuth, (req, res, next) => {
+  app.put('/api/workers/:id', requireAuth, requireNotBanned, (req, res, next) => {
     try {
       res.json(svc.updateWorker(db, req.user.id, req.params.id, req.body || {}));
     } catch (err) {
@@ -297,7 +317,7 @@ function createApp(db, options = {}) {
     }
   });
 
-  app.post('/api/workers/:id/reviews', requireAuth, requireVerified, (req, res, next) => {
+  app.post('/api/workers/:id/reviews', requireAuth, requireVerified, requireNotBanned, (req, res, next) => {
     try {
       res.status(201).json(svc.addReview(db, req.user.id, req.params.id, req.body || {}));
     } catch (err) {
@@ -305,11 +325,55 @@ function createApp(db, options = {}) {
     }
   });
 
-  // Centralized error handling: WorkerServiceError/AuthError carry a
-  // client-safe status + message; anything else is an unexpected 500.
+  // ---------- Reports (Play Console "User Content Sharing": lets anyone
+  // flag a listing or review; requireAdmin routes just below are what
+  // actually act on them) ----------
+
+  app.post('/api/reports', requireAuth, requireVerified, (req, res, next) => {
+    try {
+      res.status(201).json(modSvc.createReport(db, req.user.id, req.body || {}));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ---------- Admin ----------
+  // Every route below requires req.user.isAdmin, which is only ever true
+  // for an account whose email is listed in the ADMIN_EMAILS env var (see
+  // authService.syncAdminFlag) — there is no signup flag or API call that
+  // grants it.
+
+  app.get('/api/admin/reports', requireAuth, requireAdmin, (req, res) => {
+    res.json(modSvc.listReports(db, { status: req.query.status }));
+  });
+
+  app.post('/api/admin/reports/:id/action', requireAuth, requireAdmin, (req, res, next) => {
+    try {
+      res.json(modSvc.actOnReport(db, req.params.id, (req.body || {}).action));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get('/api/admin/banned-users', requireAuth, requireAdmin, (req, res) => {
+    res.json(modSvc.listBannedUsers(db));
+  });
+
+  app.post('/api/admin/banned-users/:id/unban', requireAuth, requireAdmin, (req, res, next) => {
+    try {
+      modSvc.unbanUser(db, req.params.id);
+      res.status(204).end();
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Centralized error handling: WorkerServiceError/AuthError/ModerationError
+  // carry a client-safe status + message; anything else is an unexpected
+  // 500.
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
-    if (err instanceof WorkerServiceError || err instanceof AuthError) {
+    if (err instanceof WorkerServiceError || err instanceof AuthError || err instanceof ModerationError) {
       return res.status(err.status).json({ error: err.message });
     }
     console.error(err);

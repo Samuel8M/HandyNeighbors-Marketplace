@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin — HandyNeighbors</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="/icons/icon-192.png" />
+  <meta name="robots" content="noindex, nofollow" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-row">
+      <a class="brand" href="/">
+        <span class="brand-mark" aria-hidden="true">🛠️</span>
+        HandyNeighbors admin
+      </a>
+      <a class="btn btn-ghost btn-sm" href="/">← Back to site</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="admin-denied" class="panel" hidden>
+      <h2>Admins only</h2>
+      <p>You're either not signed in, or signed in as an account without admin access.</p>
+    </div>
+
+    <div id="admin-content" hidden>
+      <section class="panel">
+        <h2>Open reports</h2>
+        <p class="field-hint">Someone flagged this listing or review as violating HandyNeighbors' content policies. Pick an action for each.</p>
+        <div id="reports-list"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Suspended accounts</h2>
+        <p class="field-hint">Banned accounts can still sign in, browse, and delete themselves — they just can't post listings or leave reviews.</p>
+        <div id="banned-list"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="admin.js"></script>
+</body>
+</html>

@@ -211,8 +211,31 @@ manage client-side.
 | DELETE | `/api/workers/:id`                | Requires auth. `403` unless you own the listing. |
 | GET    | `/api/price-check`                | Public. Query params: `skill` (required), `city`, `state`. Returns `count`, `low`, `median`, `average`, `high`, and the matching workers sorted by rate. |
 | GET    | `/api/workers/:id/reviews`        | Public. List reviews for a worker. |
-| POST   | `/api/workers/:id/reviews`        | Requires auth + a verified email. `{ rating (1-5), comment? }` — the reviewer's name comes from their account, not free text. `400` on reviewing your own listing, `409` on a second review of the same listing. |
+| POST   | `/api/workers/:id/reviews`        | Requires auth + a verified email + not suspended. `{ rating (1-5), comment? }` — the reviewer's name comes from their account, not free text. `400` on reviewing your own listing, `409` on a second review of the same listing. |
+| POST   | `/api/reports`                    | Requires auth + a verified email. `{ targetType: 'worker' \| 'review', targetId, reason, details? }`. `reason` is one of `spam`, `scam_or_fraud`, `inappropriate_content`, `harassment`, `fake_listing`, `other`. `400` on reporting your own content. |
+| GET    | `/api/admin/reports`              | Admin only (`403` otherwise). Optional `?status=open\|dismissed\|actioned`. |
+| POST   | `/api/admin/reports/:id/action`   | Admin only. `{ action: 'dismiss' \| 'delete_content' \| 'ban_user' \| 'delete_and_ban' }`. |
+| GET    | `/api/admin/banned-users`         | Admin only. Currently-suspended accounts. |
+| POST   | `/api/admin/banned-users/:id/unban` | Admin only. Lifts a suspension. |
 | GET    | `/health`                         | Liveness check. |
+
+## Content moderation (reports, bans, and the admin console)
+
+Every listing and review can be flagged by any other signed-in, verified
+account (a "Report" link on the listing and on each review). A flag never
+takes any action by itself — it lands in a queue at **`/admin.html`**,
+visible only to accounts whose email is listed in the `ADMIN_EMAILS` env
+var (comma-separated; see `authService.syncAdminFlag` — there's no signup
+flag or API call that grants admin, so listing an address there is the
+only way in). From that queue an admin can dismiss a report, delete the
+reported content, suspend the account behind it (`requireNotBanned` in
+`server.js` then blocks that account from posting listings or leaving
+reviews — they can still sign in, browse, and delete their own account),
+or both at once.
+
+This is what backs Google Play's Content Ratings "User Content Sharing"
+questions (reporting and blocking user-generated content) — see
+`src/moderationService.js` for the reason/action vocabulary.
 
 ## Running the tests
 
@@ -220,14 +243,15 @@ manage client-side.
 npm test
 ```
 
-40 tests: service-level unit tests against an in-memory database (worker
+50 tests: service-level unit tests against an in-memory database (worker
 validation, search filters and sorting, city aggregation, price-matching
-math, ownership enforcement) and against `authService` directly (signup
-validation, login, sessions, email verification, account deletion), plus
-HTTP integration tests exercising the full signup → verify → post →
-search → price-check → review → update → delete → delete-account
-lifecycle — cookies, ownership, and rate limiting included — through a
-real Express server.
+math, ownership enforcement, reports/moderation actions) and against
+`authService` directly (signup validation, login, sessions, email
+verification, account deletion), plus HTTP integration tests exercising
+the full signup → verify → post → search → price-check → review → update
+→ delete → delete-account lifecycle, reporting content, and the
+admin-only moderation routes (gated by `ADMIN_EMAILS`) — cookies,
+ownership, and rate limiting included — through a real Express server.
 
 ## Design notes / trade-offs
 
