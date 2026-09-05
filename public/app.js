@@ -555,15 +555,18 @@
     }
   }
 
-  // When no email provider is connected (see src/emailSender.js), the API
-  // hands back the verification link directly instead of silently doing
-  // nothing — this is what makes that link usable from the browser.
+  // Covers every case where no real email actually reached an inbox: no
+  // provider configured (mode 'dev-log'), or the provider rejected the
+  // send (mode 'resend-error' — e.g. an unverified Resend sender domain
+  // can only deliver to the account's own address). Either way the API
+  // still hands back the verification link, so this offers it directly
+  // instead of leaving someone waiting on an email that will never come.
   async function offerDevModeVerification(verification) {
-    if (!verification || verification.mode !== 'dev-log' || !verification.verifyUrl) return;
-    const proceed = confirm(
-      "No email service is connected in this environment, so there's no real inbox to check. "
-      + 'Click OK to verify your account now using the link that would have been emailed to you.'
-    );
+    if (!verification || verification.sent || !verification.verifyUrl) return;
+    const explanation = verification.mode === 'resend-error'
+      ? "The verification email couldn't actually be delivered (the connected email service rejected it)."
+      : "No email service is connected in this environment, so there's no real inbox to check.";
+    const proceed = confirm(`${explanation} Click OK to verify your account now using the link that would have been emailed to you.`);
     if (!proceed) return;
     const token = new URL(verification.verifyUrl, window.location.origin).searchParams.get('token');
     await api(`/api/auth/verify-email?token=${encodeURIComponent(token)}`);
@@ -636,7 +639,7 @@
   async function handleResendVerification() {
     try {
       const result = await api('/api/auth/resend-verification', { method: 'POST' });
-      if (result.verification && result.verification.mode === 'dev-log') {
+      if (result.verification && !result.verification.sent) {
         await offerDevModeVerification(result.verification);
       } else {
         alert('Verification email sent — check your inbox.');
