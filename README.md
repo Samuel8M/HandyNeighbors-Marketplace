@@ -147,6 +147,35 @@ database, and the full test suite only exist in the Express version. Once
 GitHub Pages is enabled for this repo (Settings → Pages → deploy from
 `main` / `docs`), it's served free, permanently, straight from the repo.
 
+## Android app (Google Play)
+
+`android/` is a real Android app wrapping the live site as a **Trusted Web
+Activity (TWA)** — Google's own supported way to ship a website to the Play
+Store as a full-screen app with no browser address bar, not a rewrite in a
+different framework. `public/.well-known/assetlinks.json` is what makes the
+address bar actually disappear: it's a Digital Asset Links statement
+proving this exact app (package `com.handyneighbors.app`, tied to the
+release signing key's certificate fingerprint) is authorized to open this
+site's links, and it's confirmed resolving correctly via Google's own
+verification API (`digitalassetlinks.googleapis.com`).
+
+The project was generated with [Bubblewrap](https://github.com/GoogleChromeLabs/bubblewrap)
+(`android/twa-manifest.json` is its config), built with Gradle
+(`bundleRelease`), and signed with `jarsigner` into a release `.aab` — the
+format Play Console requires. `android/generate-project.js` is the one-off
+script used to generate the project non-interactively (Bubblewrap's CLI
+wizard has no scripted mode); it's not meant to be run again once the
+project and signing key exist. **The signing keystore itself is
+deliberately not committed** (see `android/.gitignore`) — whoever holds it
+controls all future updates to this app on the Play Store, so it needs to
+live somewhere private and durable instead, not in a public repo's history.
+
+What's left is Play Console itself, which needs a real person: a Google
+Play Console developer account (one-time $25 fee, identity verification),
+the store listing (description, real device screenshots, content rating
+questionnaire), and uploading the `.aab`. The Privacy Policy URL Play
+Console asks for is already live: `https://handyneighbors.onrender.com/privacy.html`.
+
 ## Getting started
 
 ```bash
