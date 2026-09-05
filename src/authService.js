@@ -86,6 +86,33 @@ function syncAdminFlag(db, row) {
   return row;
 }
 
+// Bumps last_active_at and clears any pending inactivity warning —
+// called at login and (throttled) whenever a session gets used, so
+// retentionService's 90-day clock only ever measures real gaps in use,
+// and someone who was warned then came back isn't warned again next time
+// they go quiet unless they actually cross the threshold again.
+function touchActivity(db, userId) {
+  db.prepare(`
+    UPDATE users SET last_active_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), inactivity_warned_at = NULL
+    WHERE id = ?
+  `).run(userId);
+}
+
+// Session resolution runs on every request, so this only writes if the
+// last recorded activity is more than a day old — cheap enough to skip
+// entirely otherwise, and still far more precise than the 90-day window
+// it's protecting.
+const ACTIVITY_TOUCH_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
+function touchActivityIfStale(db, row) {
+  const last = row.last_active_at ? new Date(row.last_active_at).getTime() : 0;
+  if (Date.now() - last > ACTIVITY_TOUCH_THRESHOLD_MS) {
+    touchActivity(db, row.id);
+    row.last_active_at = new Date().toISOString();
+    row.inactivity_warned_at = null;
+  }
+}
+
 function getPublicUser(db, userId) {
   const row = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
   return row ? toPublicUser(syncAdminFlag(db, row)) : null;
@@ -117,6 +144,7 @@ function resolveSession(db, sessionToken) {
     db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash);
     return null;
   }
+  touchActivityIfStale(db, row);
   return toPublicUser(syncAdminFlag(db, row));
 }
 
@@ -178,6 +206,7 @@ function login(db, { email, password }) {
   if (!row || !verifyPassword(String(password || ''), row.password_hash)) {
     throw new AuthError(401, 'Incorrect email or password');
   }
+  touchActivity(db, row.id);
   const session = createSession(db, row.id);
   return { user: toPublicUser(syncAdminFlag(db, row)), session };
 }
@@ -227,6 +256,7 @@ module.exports = {
   verifyEmail,
   resendVerification,
   getPublicUser,
+  touchActivity,
   // exported for tests / for server.js's cookie plumbing
   generateToken,
   hashToken,

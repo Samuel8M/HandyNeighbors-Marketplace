@@ -238,6 +238,26 @@ shows up everywhere their name does: next to each of their reviews, and
 in their own header chip once signed in — every account builds a visible
 track record, not just the ones posting listings.
 
+## Data retention (auto-deletion after 90 days idle)
+
+`src/retentionService.js` automatically deletes an account — and, via
+cascade, every listing/review/rating/session/report tied to it — after
+**90 days with no activity**, with a **warning email at 83 days** (a
+week's notice) so deletion never happens silently. "Activity" is
+`users.last_active_at`, bumped at signup, at login, and (throttled to
+once/day so it's not a write on every request) whenever an existing
+session is used — see `authService.touchActivity`. Admin accounts are
+exempt, so moderation access can't lapse from simple inactivity.
+
+In production (`bootstrap()` in `src/server.js`) this runs once shortly
+after the process starts and once every 24 hours after that — there's no
+separate cron infrastructure, so on a host that spins down when idle the
+sweep simply catches up the next time something wakes the process, which
+is more than adequate for a 90-day window. `sweepInactiveAccounts` is
+exported standalone and covered directly by
+`test/retentionService.test.js` for anyone who wants to verify the
+threshold logic without waiting 90 days.
+
 ## Content moderation (reports, bans, and the admin console)
 
 Every listing and review can be flagged by any other signed-in, verified
@@ -262,17 +282,17 @@ questions (reporting and blocking user-generated content) — see
 npm test
 ```
 
-55 tests: service-level unit tests against an in-memory database (worker
+59 tests: service-level unit tests against an in-memory database (worker
 validation, search filters and sorting, city aggregation, price-matching
 math, ownership enforcement, reports/moderation actions, two-sided
-customer ratings) and against `authService` directly (signup validation,
-login, sessions, email verification, account deletion), plus HTTP
-integration tests exercising the full signup → verify → post → search →
-price-check → review → update → delete → delete-account lifecycle,
-reporting content, the admin-only moderation routes (gated by
-`ADMIN_EMAILS`), and a worker rating back a customer who reviewed
-them — cookies, ownership, and rate limiting included — through a real
-Express server.
+customer ratings, the 83/90-day retention thresholds) and against
+`authService` directly (signup validation, login, sessions, email
+verification, account deletion, activity tracking), plus HTTP integration
+tests exercising the full signup → verify → post → search → price-check →
+review → update → delete → delete-account lifecycle, reporting content,
+the admin-only moderation routes (gated by `ADMIN_EMAILS`), and a worker
+rating back a customer who reviewed them — cookies, ownership, and rate
+limiting included — through a real Express server.
 
 ## Design notes / trade-offs
 

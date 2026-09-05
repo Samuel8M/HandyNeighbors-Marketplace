@@ -127,7 +127,19 @@ function createDb(filePath) {
       -- A banned account keeps browsing/read access and can still delete
       -- itself, but requireNotBanned blocks it from posting listings,
       -- editing them, or leaving reviews.
-      banned_at TEXT
+      banned_at TEXT,
+      -- Bumped at signup, at login, and (throttled) on any session use —
+      -- see authService's touchActivity — and read by retentionService's
+      -- daily sweep to auto-delete accounts idle for 90 days. Never for
+      -- an admin account (see retentionService's is_admin exclusion), so
+      -- moderation access can't lapse just because no one filed a report
+      -- in three months.
+      last_active_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      -- Set once retentionService sends the "your account is about to be
+      -- deleted for inactivity" warning, so the same account isn't
+      -- warned twice before it either logs back in (which clears this,
+      -- see authService.touchActivity) or actually gets deleted.
+      inactivity_warned_at TEXT
     );
 
     -- A session is a long random token handed to the browser as a cookie;
@@ -236,6 +248,7 @@ function createDb(filePath) {
   migrateEquipmentCategory(db);
   migrateWorkersAndReviewsToAccounts(db);
   migrateModerationColumns(db);
+  migrateRetentionColumns(db);
   seedSkills(db);
   seedEquipment(db);
 
@@ -293,6 +306,22 @@ function migrateModerationColumns(db) {
   }
   if (!columns.some((c) => c.name === 'banned_at')) {
     db.exec('ALTER TABLE users ADD COLUMN banned_at TEXT');
+  }
+}
+
+// Databases created before the inactivity-retention policy won't have
+// these columns. Backfilled to *now* (not, say, created_at) for existing
+// rows on purpose — an old account shouldn't be treated as already 90
+// days idle the moment this ships; it gets a fresh countdown instead.
+function migrateRetentionColumns(db) {
+  const columns = db.prepare('PRAGMA table_info(users)').all();
+  if (columns.length === 0) return;
+  if (!columns.some((c) => c.name === 'last_active_at')) {
+    db.exec('ALTER TABLE users ADD COLUMN last_active_at TEXT');
+    db.exec("UPDATE users SET last_active_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE last_active_at IS NULL");
+  }
+  if (!columns.some((c) => c.name === 'inactivity_warned_at')) {
+    db.exec('ALTER TABLE users ADD COLUMN inactivity_warned_at TEXT');
   }
 }
 

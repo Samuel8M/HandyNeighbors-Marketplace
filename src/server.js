@@ -8,7 +8,8 @@ const svc = require('./workerService');
 const authSvc = require('./authService');
 const modSvc = require('./moderationService');
 const ratingSvc = require('./ratingService');
-const { createEmailSender } = require('./emailSender');
+const retentionSvc = require('./retentionService');
+const { createEmailSender, createNoticeSender } = require('./emailSender');
 const { WorkerServiceError } = svc;
 const { AuthError } = authSvc;
 const { ModerationError } = modSvc;
@@ -409,6 +410,21 @@ function createApp(db, options = {}) {
   return app;
 }
 
+// Runs retentionService's sweep once, logging what it did (or any
+// failure) rather than letting either crash the process — this is a
+// background job, not a request handler, so there's no caller to hand an
+// error back to.
+async function runRetentionSweep(db, sendNoticeEmail) {
+  try {
+    const { warned, deleted } = await retentionSvc.sweepInactiveAccounts(db, sendNoticeEmail);
+    if (warned || deleted) {
+      console.log(`[retention] warned ${warned}, deleted ${deleted} inactive account(s)`);
+    }
+  } catch (err) {
+    console.error('[retention] sweep failed:', err);
+  }
+}
+
 function bootstrap() {
   const dataDir = path.join(__dirname, '..', 'data');
   require('fs').mkdirSync(dataDir, { recursive: true });
@@ -418,6 +434,15 @@ function bootstrap() {
   app.listen(port, () => {
     console.log(`HandyNeighbors listening on http://localhost:${port}`);
   });
+
+  // Once a day is plenty for a 90-day window, plus a run shortly after
+  // boot — the process may have been asleep (a free-tier host spins down
+  // when idle) for longer than a day, so this catches up as soon as
+  // something wakes it rather than waiting for the next scheduled tick.
+  const sendNoticeEmail = createNoticeSender();
+  setTimeout(() => runRetentionSweep(db, sendNoticeEmail), 60 * 1000);
+  setInterval(() => runRetentionSweep(db, sendNoticeEmail), 24 * 60 * 60 * 1000);
+
   return app;
 }
 
