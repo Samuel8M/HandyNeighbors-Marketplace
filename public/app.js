@@ -12,6 +12,42 @@
     }[c]));
   }
 
+  // Shows a validation/API error inline, right inside the form that
+  // triggered it — instead of a blocking alert() the user has to
+  // dismiss before they can even see which field to fix. Pass an empty
+  // message to clear it (done at the start of every submit, so a stale
+  // error doesn't linger past a fixed retry).
+  function setFormError(form, message) {
+    let el = form.querySelector('.error-text');
+    if (!el) {
+      el = document.createElement('p');
+      el.className = 'error-text';
+      form.insertBefore(el, form.firstChild);
+    }
+    el.textContent = message || '';
+    el.hidden = !message;
+  }
+
+  // Wraps a form's submit handler so the button visibly reflects what's
+  // happening (label swaps to `busyLabel`, disabled) instead of just
+  // going quiet for however long the request takes — the difference
+  // between "is this working?" and a clear "yes, hang on."
+  async function withLoadingButton(form, busyLabel, fn) {
+    const btn = form.querySelector('button[type="submit"]');
+    const originalLabel = btn.textContent;
+    setFormError(form, '');
+    btn.disabled = true;
+    btn.textContent = busyLabel;
+    try {
+      await fn();
+    } catch (err) {
+      setFormError(form, err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+    }
+  }
+
   async function api(path, options = {}) {
     const res = await fetch(path, {
       ...options,
@@ -267,24 +303,18 @@
     $('#post-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const form = e.target;
-      const data = Object.fromEntries(new FormData(form).entries());
-      data.skills = $$('input[name="skills"]:checked', form).map((el) => el.value);
-      data.equipment = $$('input[name="equipment"]:checked', form).map((el) => el.value);
+      await withLoadingButton(form, 'Posting…', async () => {
+        const data = Object.fromEntries(new FormData(form).entries());
+        data.skills = $$('input[name="skills"]:checked', form).map((el) => el.value);
+        data.equipment = $$('input[name="equipment"]:checked', form).map((el) => el.value);
 
-      const submitBtn = form.querySelector('button[type="submit"]');
-      submitBtn.disabled = true;
-      try {
         const { worker } = await api('/api/workers', { method: 'POST', body: JSON.stringify(data) });
         state.lastCreatedWorkerId = worker.id;
         form.hidden = true;
         $('#post-success').hidden = false;
         $('#view-listing-link').onclick = (ev) => { ev.preventDefault(); openWorkerModal(worker.id); };
         state.cities = await api('/api/cities'); // so the new city shows up next time Find is visited
-      } catch (err) {
-        alert(err.message);
-      } finally {
-        submitBtn.disabled = false;
-      }
+      });
     });
   }
 
@@ -293,8 +323,11 @@
   async function openWorkerModal(id) {
     const backdrop = $('#worker-modal');
     const body = $('#modal-body');
+    backdrop._opener = document.activeElement;
     body.innerHTML = '<p>Loading…</p>';
     backdrop.hidden = false;
+    document.body.style.overflow = 'hidden';
+    $('#modal-close').focus();
 
     try {
       const [worker, reviews] = await Promise.all([
@@ -307,14 +340,13 @@
       if (reviewForm) {
         reviewForm.addEventListener('submit', async (e) => {
           e.preventDefault();
-          const data = Object.fromEntries(new FormData(e.target).entries());
-          data.rating = Number(data.rating);
-          try {
+          const form = e.target;
+          await withLoadingButton(form, 'Submitting…', async () => {
+            const data = Object.fromEntries(new FormData(form).entries());
+            data.rating = Number(data.rating);
             await api(`/api/workers/${id}/reviews`, { method: 'POST', body: JSON.stringify(data) });
             openWorkerModal(id);
-          } catch (err) {
-            alert(err.message);
-          }
+          });
         });
       }
 
@@ -427,16 +459,37 @@
     `;
   }
 
-  function wireModalDismiss(backdropId, closeBtnId) {
+  // closeOnBackdropClick is off for the auth modal on purpose: a stray
+  // click while reaching for a field (common on a form this size) used to
+  // silently discard whatever you'd typed, with the same effect as
+  // hitting Escape by accident. The close button and Escape are still
+  // explicit, deliberate ways to back out — only the easy-to-trigger,
+  // easy-to-not-notice one is disabled for the form modal. The
+  // (read-only) worker-detail modal keeps click-outside-to-close, since
+  // there's no half-finished input to lose there.
+  function wireModalDismiss(backdropId, closeBtnId, { closeOnBackdropClick = true } = {}) {
     const backdrop = $(`#${backdropId}`);
-    $(`#${closeBtnId}`).addEventListener('click', () => { backdrop.hidden = true; });
-    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.hidden = true; });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') backdrop.hidden = true; });
+    const close = () => {
+      backdrop.hidden = true;
+      document.body.style.overflow = ''; // re-allow background scroll
+      // Sends focus back to whatever was focused right before the modal
+      // opened (recorded as a live element reference, not an id — the
+      // triggering button is often re-rendered by the time the modal
+      // closes, e.g. a search result card after the list refreshes).
+      if (backdrop._opener && document.contains(backdrop._opener)) backdrop._opener.focus();
+    };
+    $(`#${closeBtnId}`).addEventListener('click', close);
+    if (closeOnBackdropClick) {
+      backdrop.addEventListener('click', (e) => { if (e.target === backdrop) close(); });
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !backdrop.hidden) close();
+    });
   }
 
   function initModal() {
     wireModalDismiss('worker-modal', 'modal-close');
-    wireModalDismiss('auth-modal', 'auth-modal-close');
+    wireModalDismiss('auth-modal', 'auth-modal-close', { closeOnBackdropClick: false });
   }
 
   // ---------- Auth ----------
@@ -518,9 +571,13 @@
     return `
       <h2 id="auth-modal-title">Create your account</h2>
       <form id="signup-form" class="auth-form">
-        <div class="field"><label for="signup-name">Name</label><input id="signup-name" name="name" required maxlength="80" /></div>
-        <div class="field"><label for="signup-email">Email</label><input id="signup-email" name="email" type="email" required maxlength="200" /></div>
-        <div class="field"><label for="signup-password">Password</label><input id="signup-password" name="password" type="password" required minlength="8" maxlength="200" /></div>
+        <div class="field"><label for="signup-name">Name</label><input id="signup-name" name="name" autocomplete="name" required maxlength="80" /></div>
+        <div class="field"><label for="signup-email">Email</label><input id="signup-email" name="email" type="email" inputmode="email" autocomplete="email" required maxlength="200" /></div>
+        <div class="field">
+          <label for="signup-password">Password</label>
+          <input id="signup-password" name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="200" aria-describedby="signup-password-hint" />
+          <span id="signup-password-hint" class="field-hint" style="margin:0.25rem 0 0">At least 8 characters.</span>
+        </div>
         <label class="auth-terms-check">
           <input type="checkbox" name="acceptedTerms" required />
           <span>I agree to the <a href="/terms.html" target="_blank" rel="noopener">Terms of Service</a> and <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span>
@@ -535,8 +592,8 @@
     return `
       <h2 id="auth-modal-title">Log in</h2>
       <form id="login-form" class="auth-form">
-        <div class="field"><label for="login-email">Email</label><input id="login-email" name="email" type="email" required maxlength="200" /></div>
-        <div class="field"><label for="login-password">Password</label><input id="login-password" name="password" type="password" required maxlength="200" /></div>
+        <div class="field"><label for="login-email">Email</label><input id="login-email" name="email" type="email" inputmode="email" autocomplete="email" required maxlength="200" /></div>
+        <div class="field"><label for="login-password">Password</label><input id="login-password" name="password" type="password" autocomplete="current-password" required maxlength="200" /></div>
         <button type="submit" class="btn btn-primary">Log in</button>
         <p class="auth-switch">New here? <a href="#" id="switch-to-signup">Create an account</a></p>
       </form>
@@ -544,8 +601,13 @@
   }
 
   function openAuthModal(mode) {
+    const backdrop = $('#auth-modal');
+    backdrop._opener = document.activeElement;
     $('#auth-modal-body').innerHTML = mode === 'login' ? renderLoginFormHtml() : renderSignupFormHtml();
-    $('#auth-modal').hidden = false;
+    backdrop.hidden = false;
+    document.body.style.overflow = 'hidden';
+    const firstField = $('#auth-modal-body input');
+    if (firstField) firstField.focus();
     if (mode === 'login') {
       $('#login-form').addEventListener('submit', handleLoginSubmit);
       $('#switch-to-signup').addEventListener('click', (e) => { e.preventDefault(); openAuthModal('signup'); });
@@ -578,39 +640,27 @@
   async function handleSignupSubmit(e) {
     e.preventDefault();
     const form = e.target;
-    const data = Object.fromEntries(new FormData(form).entries());
-    data.acceptedTerms = form.elements.acceptedTerms.checked;
-    const submitBtn = form.querySelector('button[type="submit"]');
-    submitBtn.disabled = true;
-    try {
+    await withLoadingButton(form, 'Creating account…', async () => {
+      const data = Object.fromEntries(new FormData(form).entries());
+      data.acceptedTerms = form.elements.acceptedTerms.checked;
       const result = await api('/api/auth/signup', { method: 'POST', body: JSON.stringify(data) });
       state.currentUser = result.user;
       $('#auth-modal').hidden = true;
       refreshAuthUI();
       await offerDevModeVerification(result.verification);
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      submitBtn.disabled = false;
-    }
+    });
   }
 
   async function handleLoginSubmit(e) {
     e.preventDefault();
     const form = e.target;
-    const data = Object.fromEntries(new FormData(form).entries());
-    const submitBtn = form.querySelector('button[type="submit"]');
-    submitBtn.disabled = true;
-    try {
+    await withLoadingButton(form, 'Logging in…', async () => {
+      const data = Object.fromEntries(new FormData(form).entries());
       const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(data) });
       state.currentUser = result.user;
       $('#auth-modal').hidden = true;
       refreshAuthUI();
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      submitBtn.disabled = false;
-    }
+    });
   }
 
   async function handleLogout() {
