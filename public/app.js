@@ -1,7 +1,7 @@
 'use strict';
 
 (() => {
-  const state = { skills: [], equipment: [], cities: [], lastCreatedWorkerId: null };
+  const state = { skills: [], equipment: [], cities: [], currentUser: null, lastCreatedWorkerId: null };
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -135,6 +135,15 @@
     return `★ ${rating.toFixed(1)}`;
   }
 
+  function formatDate(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+  }
+
+  function verifiedBadgeHtml(w) {
+    return w.verified ? '<span class="verified-badge" title="This account\'s email address is confirmed">Verified</span>' : '';
+  }
+
   function workerCardHtml(w) {
     const skillPills = w.skills.slice(0, 4).map((s) => `<span class="pill">${escapeHtml(s.name)}</span>`).join('');
     const moreSkills = w.skills.length > 4 ? `<span class="pill pill-muted">+${w.skills.length - 4} more</span>` : '';
@@ -146,7 +155,7 @@
     return `
       <button type="button" class="worker-card" data-id="${w.id}">
         <div class="worker-card-top">
-          <span class="worker-name">${escapeHtml(w.name)}</span>
+          <span class="worker-name">${escapeHtml(w.name)} ${verifiedBadgeHtml(w)}</span>
           <span class="worker-rate">$${w.hourlyRate}/hr</span>
         </div>
         <span class="worker-location">${escapeHtml(w.city)}, ${escapeHtml(w.state)} · ${w.serviceRadiusMiles} mi radius</span>
@@ -250,6 +259,9 @@
   }
 
   // ---------- Post a listing ----------
+  // Posting requires a signed-in, verified account — renderPostGate() (in
+  // the auth section below) shows this form only in that state; otherwise
+  // it shows a sign-in/verify prompt in its place.
 
   function initPost() {
     $('#post-form').addEventListener('submit', async (e) => {
@@ -262,28 +274,16 @@
       const submitBtn = form.querySelector('button[type="submit"]');
       submitBtn.disabled = true;
       try {
-        const { worker, editToken } = await api('/api/workers', { method: 'POST', body: JSON.stringify(data) });
+        const { worker } = await api('/api/workers', { method: 'POST', body: JSON.stringify(data) });
         state.lastCreatedWorkerId = worker.id;
         form.hidden = true;
         $('#post-success').hidden = false;
-        $('#post-token').textContent = editToken;
         $('#view-listing-link').onclick = (ev) => { ev.preventDefault(); openWorkerModal(worker.id); };
         state.cities = await api('/api/cities'); // so the new city shows up next time Find is visited
       } catch (err) {
         alert(err.message);
       } finally {
         submitBtn.disabled = false;
-      }
-    });
-
-    $('#copy-token').addEventListener('click', async () => {
-      const text = $('#post-token').textContent;
-      try {
-        await navigator.clipboard.writeText(text);
-        $('#copy-token').textContent = 'Copied!';
-        setTimeout(() => { $('#copy-token').textContent = 'Copy edit key'; }, 1500);
-      } catch {
-        /* clipboard API unavailable — the text is already selectable on screen */
       }
     });
   }
@@ -302,17 +302,41 @@
         api(`/api/workers/${id}/reviews`),
       ]);
       body.innerHTML = renderWorkerDetail(worker, reviews);
-      $('#review-form', body).addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const data = Object.fromEntries(new FormData(e.target).entries());
-        data.rating = Number(data.rating);
-        try {
-          await api(`/api/workers/${id}/reviews`, { method: 'POST', body: JSON.stringify(data) });
-          openWorkerModal(id);
-        } catch (err) {
-          alert(err.message);
-        }
-      });
+
+      const reviewForm = $('#review-form', body);
+      if (reviewForm) {
+        reviewForm.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const data = Object.fromEntries(new FormData(e.target).entries());
+          data.rating = Number(data.rating);
+          try {
+            await api(`/api/workers/${id}/reviews`, { method: 'POST', body: JSON.stringify(data) });
+            openWorkerModal(id);
+          } catch (err) {
+            alert(err.message);
+          }
+        });
+      }
+
+      const signInLink = $('#sign-in-to-review', body);
+      if (signInLink) {
+        signInLink.addEventListener('click', (e) => { e.preventDefault(); openAuthModal('login'); });
+      }
+
+      const deleteBtn = $('#delete-listing', body);
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', async () => {
+          if (!confirm('Remove this listing? This can\'t be undone.')) return;
+          try {
+            await api(`/api/workers/${id}`, { method: 'DELETE' });
+            $('#worker-modal').hidden = true;
+            state.cities = await api('/api/cities');
+            runSearch();
+          } catch (err) {
+            alert(err.message);
+          }
+        });
+      }
     } catch (err) {
       body.innerHTML = `<p class="error-text">${escapeHtml(err.message)}</p>`;
     }
@@ -351,9 +375,36 @@
         `).join('')
       : '<li>No reviews yet.</li>';
 
+    const isOwner = state.currentUser && state.currentUser.id === w.ownerId;
+    const reviewSection = isOwner
+      ? '<p class="field-hint">This is your listing — you can\'t review your own work.</p>'
+      : !state.currentUser
+        ? '<p class="field-hint"><a href="#" id="sign-in-to-review">Sign in</a> to leave a review.</p>'
+        : !state.currentUser.emailVerified
+          ? '<p class="field-hint">Verify your email (see the banner above) to leave a review.</p>'
+          : `
+            <form id="review-form" class="review-form">
+              <div class="field">
+                <label for="review-rating">Rating</label>
+                <select id="review-rating" name="rating" required>
+                  <option value="5">★★★★★</option>
+                  <option value="4">★★★★☆</option>
+                  <option value="3">★★★☆☆</option>
+                  <option value="2">★★☆☆☆</option>
+                  <option value="1">★☆☆☆☆</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="review-comment">Comment (optional)</label>
+                <textarea id="review-comment" name="comment" rows="2" maxlength="1000"></textarea>
+              </div>
+              <button type="submit" class="btn btn-primary">Leave a review</button>
+            </form>`;
+
     return `
-      <h2 id="modal-name">${escapeHtml(w.name)}</h2>
+      <h2 id="modal-name">${escapeHtml(w.name)} ${verifiedBadgeHtml(w)}</h2>
       <p class="worker-location">${escapeHtml(w.city)}, ${escapeHtml(w.state)} · ${w.serviceRadiusMiles} mi radius</p>
+      ${w.memberSince ? `<p class="field-hint">Member since ${escapeHtml(formatDate(w.memberSince))}</p>` : ''}
       <p class="rating-row">${renderStars(w.rating)}${w.reviewCount ? ` (${w.reviewCount} review${w.reviewCount === 1 ? '' : 's'})` : ''}</p>
       <p class="worker-rate" style="font-size:1.4rem">$${w.hourlyRate}/hr</p>
       <p>${escapeHtml(w.bio || 'No bio yet.')}</p>
@@ -370,39 +421,239 @@
 
       <h3>Reviews</h3>
       <ul class="review-list">${reviewItems}</ul>
+      ${reviewSection}
 
-      <form id="review-form" class="review-form">
-        <div class="field">
-          <label for="review-author">Your name</label>
-          <input id="review-author" name="authorName" required maxlength="80" />
+      ${isOwner ? '<button type="button" id="delete-listing" class="btn btn-ghost" style="margin-top:1rem;color:var(--error);border-color:var(--error)">Remove my listing</button>' : ''}
+    `;
+  }
+
+  function wireModalDismiss(backdropId, closeBtnId) {
+    const backdrop = $(`#${backdropId}`);
+    $(`#${closeBtnId}`).addEventListener('click', () => { backdrop.hidden = true; });
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) backdrop.hidden = true; });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') backdrop.hidden = true; });
+  }
+
+  function initModal() {
+    wireModalDismiss('worker-modal', 'modal-close');
+    wireModalDismiss('auth-modal', 'auth-modal-close');
+  }
+
+  // ---------- Auth ----------
+  // Every piece of UI that depends on "am I signed in / verified" —
+  // the header, the verify-your-email banner, and the List Your Services
+  // gate — is redrawn together by refreshAuthUI() any time that changes.
+
+  function renderAuthArea() {
+    const area = $('#auth-area');
+    if (!state.currentUser) {
+      area.innerHTML = `
+        <button type="button" class="btn btn-ghost btn-sm" id="nav-login">Log in</button>
+        <button type="button" class="btn btn-primary btn-sm" id="nav-signup">Sign up</button>
+      `;
+      $('#nav-login').addEventListener('click', () => openAuthModal('login'));
+      $('#nav-signup').addEventListener('click', () => openAuthModal('signup'));
+      return;
+    }
+    area.innerHTML = `
+      <span class="auth-user-chip">
+        <span class="auth-user-name">${escapeHtml(state.currentUser.name)}</span>
+        <button type="button" class="btn btn-ghost btn-sm" id="nav-logout">Log out</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="nav-delete-account" title="Permanently delete your account, listings, and reviews">Delete account</button>
+      </span>
+    `;
+    $('#nav-logout').addEventListener('click', handleLogout);
+    $('#nav-delete-account').addEventListener('click', handleDeleteAccount);
+  }
+
+  function renderVerifyBanner() {
+    const banner = $('#verify-banner');
+    if (!state.currentUser || state.currentUser.emailVerified) {
+      banner.hidden = true;
+      return;
+    }
+    banner.hidden = false;
+    $('#verify-banner-text').textContent = `Verify your email (${state.currentUser.email}) to post listings and leave reviews.`;
+    $('#verify-banner-resend').onclick = handleResendVerification;
+  }
+
+  function renderPostGate() {
+    const gate = $('#post-gate');
+    const form = $('#post-form');
+    if (state.currentUser && state.currentUser.emailVerified) {
+      gate.hidden = true;
+      form.hidden = false;
+      return;
+    }
+    form.hidden = true;
+    gate.hidden = false;
+    if (!state.currentUser) {
+      gate.innerHTML = `
+        <h2>Sign in to list your services</h2>
+        <p>Free, always — we just need an account so listings and reviews belong to real people, not anonymous text fields.</p>
+        <div class="btn-row">
+          <button type="button" class="btn btn-primary" id="gate-signup">Create a free account</button>
+          <button type="button" class="btn btn-ghost" id="gate-login">Log in</button>
         </div>
-        <div class="field">
-          <label for="review-rating">Rating</label>
-          <select id="review-rating" name="rating" required>
-            <option value="5">★★★★★</option>
-            <option value="4">★★★★☆</option>
-            <option value="3">★★★☆☆</option>
-            <option value="2">★★☆☆☆</option>
-            <option value="1">★☆☆☆☆</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="review-comment">Comment (optional)</label>
-          <textarea id="review-comment" name="comment" rows="2" maxlength="1000"></textarea>
-        </div>
-        <button type="submit" class="btn btn-primary">Leave a review</button>
+      `;
+      $('#gate-signup').addEventListener('click', () => openAuthModal('signup'));
+      $('#gate-login').addEventListener('click', () => openAuthModal('login'));
+    } else {
+      gate.innerHTML = `
+        <h2>Verify your email to continue</h2>
+        <p>We sent a link to ${escapeHtml(state.currentUser.email)}. Click it, then come back here.</p>
+        <div class="btn-row"><button type="button" class="btn btn-primary" id="gate-resend">Resend link</button></div>
+      `;
+      $('#gate-resend').addEventListener('click', handleResendVerification);
+    }
+  }
+
+  function refreshAuthUI() {
+    renderAuthArea();
+    renderVerifyBanner();
+    renderPostGate();
+  }
+
+  function renderSignupFormHtml() {
+    return `
+      <h2 id="auth-modal-title">Create your account</h2>
+      <form id="signup-form" class="auth-form">
+        <div class="field"><label for="signup-name">Name</label><input id="signup-name" name="name" required maxlength="80" /></div>
+        <div class="field"><label for="signup-email">Email</label><input id="signup-email" name="email" type="email" required maxlength="200" /></div>
+        <div class="field"><label for="signup-password">Password</label><input id="signup-password" name="password" type="password" required minlength="8" maxlength="200" /></div>
+        <label class="auth-terms-check">
+          <input type="checkbox" name="acceptedTerms" required />
+          <span>I agree to the <a href="/terms.html" target="_blank" rel="noopener">Terms of Service</a> and <a href="/privacy.html" target="_blank" rel="noopener">Privacy Policy</a>.</span>
+        </label>
+        <button type="submit" class="btn btn-primary">Create account</button>
+        <p class="auth-switch">Already have an account? <a href="#" id="switch-to-login">Log in</a></p>
       </form>
     `;
   }
 
-  function initModal() {
-    $('#modal-close').addEventListener('click', () => { $('#worker-modal').hidden = true; });
-    $('#worker-modal').addEventListener('click', (e) => {
-      if (e.target.id === 'worker-modal') $('#worker-modal').hidden = true;
-    });
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') $('#worker-modal').hidden = true;
-    });
+  function renderLoginFormHtml() {
+    return `
+      <h2 id="auth-modal-title">Log in</h2>
+      <form id="login-form" class="auth-form">
+        <div class="field"><label for="login-email">Email</label><input id="login-email" name="email" type="email" required maxlength="200" /></div>
+        <div class="field"><label for="login-password">Password</label><input id="login-password" name="password" type="password" required maxlength="200" /></div>
+        <button type="submit" class="btn btn-primary">Log in</button>
+        <p class="auth-switch">New here? <a href="#" id="switch-to-signup">Create an account</a></p>
+      </form>
+    `;
+  }
+
+  function openAuthModal(mode) {
+    $('#auth-modal-body').innerHTML = mode === 'login' ? renderLoginFormHtml() : renderSignupFormHtml();
+    $('#auth-modal').hidden = false;
+    if (mode === 'login') {
+      $('#login-form').addEventListener('submit', handleLoginSubmit);
+      $('#switch-to-signup').addEventListener('click', (e) => { e.preventDefault(); openAuthModal('signup'); });
+    } else {
+      $('#signup-form').addEventListener('submit', handleSignupSubmit);
+      $('#switch-to-login').addEventListener('click', (e) => { e.preventDefault(); openAuthModal('login'); });
+    }
+  }
+
+  // When no email provider is connected (see src/emailSender.js), the API
+  // hands back the verification link directly instead of silently doing
+  // nothing — this is what makes that link usable from the browser.
+  async function offerDevModeVerification(verification) {
+    if (!verification || verification.mode !== 'dev-log' || !verification.verifyUrl) return;
+    const proceed = confirm(
+      "No email service is connected in this environment, so there's no real inbox to check. "
+      + 'Click OK to verify your account now using the link that would have been emailed to you.'
+    );
+    if (!proceed) return;
+    const token = new URL(verification.verifyUrl, window.location.origin).searchParams.get('token');
+    await api(`/api/auth/verify-email?token=${encodeURIComponent(token)}`);
+    const me = await api('/api/auth/me');
+    state.currentUser = me.user;
+    refreshAuthUI();
+  }
+
+  async function handleSignupSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = Object.fromEntries(new FormData(form).entries());
+    data.acceptedTerms = form.elements.acceptedTerms.checked;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    try {
+      const result = await api('/api/auth/signup', { method: 'POST', body: JSON.stringify(data) });
+      state.currentUser = result.user;
+      $('#auth-modal').hidden = true;
+      refreshAuthUI();
+      await offerDevModeVerification(result.verification);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      submitBtn.disabled = false;
+    }
+  }
+
+  async function handleLoginSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const data = Object.fromEntries(new FormData(form).entries());
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    try {
+      const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(data) });
+      state.currentUser = result.user;
+      $('#auth-modal').hidden = true;
+      refreshAuthUI();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      submitBtn.disabled = false;
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await api('/api/auth/logout', { method: 'POST' });
+    } catch {
+      /* clear client-side state regardless */
+    }
+    state.currentUser = null;
+    refreshAuthUI();
+  }
+
+  async function handleDeleteAccount() {
+    if (!confirm("Permanently delete your account, along with every listing and review you've posted? This can't be undone.")) return;
+    try {
+      await api('/api/auth/me', { method: 'DELETE' });
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
+    state.currentUser = null;
+    refreshAuthUI();
+    runSearch();
+  }
+
+  async function handleResendVerification() {
+    try {
+      const result = await api('/api/auth/resend-verification', { method: 'POST' });
+      if (result.verification && result.verification.mode === 'dev-log') {
+        await offerDevModeVerification(result.verification);
+      } else {
+        alert('Verification email sent — check your inbox.');
+      }
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  async function initAuth() {
+    try {
+      const me = await api('/api/auth/me');
+      state.currentUser = me.user;
+    } catch {
+      state.currentUser = null;
+    }
+    refreshAuthUI();
   }
 
   // ---------- Init ----------
@@ -417,6 +668,7 @@
     } catch (err) {
       $('#results-summary').textContent = `Couldn't load skills/equipment: ${err.message}`;
     }
+    await initAuth();
     initFind();
   }
 

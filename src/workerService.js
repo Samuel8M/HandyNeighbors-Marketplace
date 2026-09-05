@@ -1,6 +1,5 @@
 'use strict';
 
-const crypto = require('crypto');
 const { slugify, withTransaction } = require('./db');
 
 class WorkerServiceError extends Error {
@@ -12,21 +11,7 @@ class WorkerServiceError extends Error {
 
 const MAX_RATE = 500;
 const MIN_RATE = 1;
-
-function hashToken(token) {
-  return crypto.createHash('sha256').update(token).digest('hex');
-}
-
-function generateEditToken() {
-  return crypto.randomBytes(24).toString('hex');
-}
-
-function tokensMatch(providedHash, storedHash) {
-  const a = Buffer.from(providedHash, 'hex');
-  const b = Buffer.from(storedHash, 'hex');
-  if (a.length !== b.length) return false;
-  return crypto.timingSafeEqual(a, b);
-}
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
 
 function cleanString(value, { field, max, required = true }) {
   if (value === undefined || value === null) {
@@ -115,20 +100,23 @@ function validateWorkerInput(db, input) {
   return { name, bio, city, state, contactEmail, contactPhone, hourlyRate, serviceRadiusMiles, skillIds, equipmentIds };
 }
 
-function createWorker(db, input) {
+// Every listing belongs to a signed-in account (userId) — see git history
+// for why this replaced the earlier "no accounts, one-time edit token"
+// model. Ownership is now just `workers.user_id`, checked by the caller's
+// session, the same way any account-based app scopes edits to the owner.
+function createWorker(db, userId, input) {
   const data = validateWorkerInput(db, input);
-  const editToken = generateEditToken();
-  const editTokenHash = hashToken(editToken);
 
   const insertWorker = db.prepare(`
-    INSERT INTO workers (name, bio, hourly_rate, city, state, service_radius_miles, contact_email, contact_phone, edit_token_hash)
-    VALUES (@name, @bio, @hourlyRate, @city, @state, @serviceRadiusMiles, @contactEmail, @contactPhone, @editTokenHash)
+    INSERT INTO workers (user_id, name, bio, hourly_rate, city, state, service_radius_miles, contact_email, contact_phone)
+    VALUES (@userId, @name, @bio, @hourlyRate, @city, @state, @serviceRadiusMiles, @contactEmail, @contactPhone)
   `);
   const insertSkill = db.prepare('INSERT INTO worker_skills (worker_id, skill_id) VALUES (?, ?)');
   const insertEquipment = db.prepare('INSERT INTO worker_equipment (worker_id, equipment_id) VALUES (?, ?)');
 
   const workerId = withTransaction(db, () => {
     const info = insertWorker.run({
+      userId,
       name: data.name,
       bio: data.bio,
       hourlyRate: data.hourlyRate,
@@ -137,14 +125,13 @@ function createWorker(db, input) {
       serviceRadiusMiles: data.serviceRadiusMiles,
       contactEmail: data.contactEmail || null,
       contactPhone: data.contactPhone || null,
-      editTokenHash,
     });
     for (const skillId of data.skillIds) insertSkill.run(info.lastInsertRowid, skillId);
     for (const equipmentId of data.equipmentIds) insertEquipment.run(info.lastInsertRowid, equipmentId);
     return info.lastInsertRowid;
   });
 
-  return { worker: getWorker(db, workerId), editToken };
+  return getWorker(db, workerId);
 }
 
 function attachTagsAndRating(db, worker) {
@@ -157,9 +144,14 @@ function attachTagsAndRating(db, worker) {
     JOIN equipment e ON e.id = we.equipment_id WHERE we.worker_id = ? ORDER BY e.category, e.name
   `).all(worker.id);
   const ratingRow = db.prepare('SELECT AVG(rating) AS avg, COUNT(*) AS count FROM reviews WHERE worker_id = ?').get(worker.id);
+  // The "Verified" trust badge and "member since" come from the owning
+  // account, not the listing — a listing can't fake being verified by
+  // itself the way a free-text field could.
+  const owner = db.prepare('SELECT email_verified, created_at FROM users WHERE id = ?').get(worker.user_id);
 
   return {
     id: worker.id,
+    ownerId: worker.user_id,
     name: worker.name,
     bio: worker.bio,
     hourlyRate: worker.hourly_rate,
@@ -170,6 +162,8 @@ function attachTagsAndRating(db, worker) {
     contactPhone: worker.contact_phone,
     createdAt: worker.created_at,
     updatedAt: worker.updated_at,
+    verified: !!(owner && owner.email_verified),
+    memberSince: owner ? owner.created_at : null,
     skills,
     equipment,
     rating: ratingRow.count > 0 ? Math.round(ratingRow.avg * 10) / 10 : null,
@@ -239,16 +233,17 @@ function sortWorkers(workers, sortBy) {
   return sorter ? [...workers].sort(sorter) : workers;
 }
 
-function verifyEditToken(db, workerId, providedToken) {
-  const row = db.prepare('SELECT edit_token_hash FROM workers WHERE id = ?').get(workerId);
-  if (!row) throw new WorkerServiceError(404, 'Worker not found');
-  if (!providedToken || !tokensMatch(hashToken(String(providedToken)), row.edit_token_hash)) {
-    throw new WorkerServiceError(403, 'Invalid or missing edit token');
+function requireOwnedWorker(db, workerId, userId) {
+  const worker = db.prepare('SELECT * FROM workers WHERE id = ?').get(workerId);
+  if (!worker) throw new WorkerServiceError(404, 'Worker not found');
+  if (worker.user_id !== userId) {
+    throw new WorkerServiceError(403, 'You can only edit or remove your own listing');
   }
+  return worker;
 }
 
-function updateWorker(db, workerId, editToken, input) {
-  verifyEditToken(db, workerId, editToken);
+function updateWorker(db, userId, workerId, input) {
+  requireOwnedWorker(db, workerId, userId);
   const data = validateWorkerInput(db, input);
 
   withTransaction(db, () => {
@@ -284,8 +279,8 @@ function updateWorker(db, workerId, editToken, input) {
   return getWorker(db, workerId);
 }
 
-function deleteWorker(db, workerId, editToken) {
-  verifyEditToken(db, workerId, editToken);
+function deleteWorker(db, userId, workerId) {
+  requireOwnedWorker(db, workerId, userId);
   db.prepare('DELETE FROM workers WHERE id = ?').run(workerId);
 }
 
@@ -336,20 +331,34 @@ function priceCheck(db, { skill, city, state }) {
   };
 }
 
-function addReview(db, workerId, input) {
-  const worker = db.prepare('SELECT id FROM workers WHERE id = ?').get(workerId);
+// One review per account per listing, and never on your own listing —
+// enforced here (self-review) and by the UNIQUE(worker_id, user_id) index
+// (repeat review, caught below and turned into a friendly 409).
+function addReview(db, userId, workerId, input) {
+  const worker = db.prepare('SELECT id, user_id FROM workers WHERE id = ?').get(workerId);
   if (!worker) throw new WorkerServiceError(404, 'Worker not found');
+  if (worker.user_id === userId) {
+    throw new WorkerServiceError(400, "You can't review your own listing");
+  }
 
-  const authorName = cleanString(input.authorName, { field: 'authorName', max: 80 });
+  const reviewer = db.prepare('SELECT name FROM users WHERE id = ?').get(userId);
   const comment = cleanString(input.comment, { field: 'comment', max: 1000, required: false });
   const rating = Number(input.rating);
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     throw new WorkerServiceError(400, 'rating must be an integer between 1 and 5');
   }
 
-  const info = db.prepare(`
-    INSERT INTO reviews (worker_id, author_name, rating, comment) VALUES (?, ?, ?, ?)
-  `).run(workerId, authorName, rating, comment);
+  let info;
+  try {
+    info = db.prepare(`
+      INSERT INTO reviews (worker_id, user_id, author_name, rating, comment) VALUES (?, ?, ?, ?, ?)
+    `).run(workerId, userId, reviewer.name, rating, comment);
+  } catch (err) {
+    if (err.errcode === SQLITE_CONSTRAINT_UNIQUE) {
+      throw new WorkerServiceError(409, "You've already reviewed this listing");
+    }
+    throw err;
+  }
 
   return db.prepare('SELECT id, author_name AS authorName, rating, comment, created_at AS createdAt FROM reviews WHERE id = ?')
     .get(info.lastInsertRowid);

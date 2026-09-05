@@ -44,9 +44,16 @@ HandyNeighbors is deliberately narrow instead:
   HandyNeighbors a directory + marketplace, not an employer, contractor, or
   financial service — see *Design notes* below for why that distinction
   matters legally.
-- **No accounts, no passwords.** Posting a listing returns a one-time edit
-  token (shown once) that's required to update or delete it later. Nothing
-  to remember, nothing to store insecurely.
+- **Real accounts, not anonymous free text.** Posting a listing or leaving a
+  review requires a signed-in, verified account — passwords are hashed
+  with `scrypt` (Node's own `crypto`, no extra dependency), sessions are
+  random tokens whose hash (not the token itself) lives in the database,
+  and a "Verified" badge means the account's email is confirmed. One
+  review per account per listing, and you can't review your own.
+- **Self-service data deletion.** Every table that references an account
+  cascades on delete, so "Delete account" in the header actually removes
+  it — and every listing and review it owns — in one step, no support
+  ticket required.
 
 ## Tech stack
 
@@ -64,13 +71,18 @@ HandyNeighbors is deliberately narrow instead:
 src/
   db.js             # opens/initializes SQLite; seeds the fixed skill/equipment lists
   workerService.js   # core domain logic: validation, search, price-matching, reviews
+  authService.js      # signup/login/sessions/email verification, password hashing
+  emailSender.js       # pluggable verification email delivery (real provider or dev-log)
   server.js          # Express app + route wiring; createApp() is test-friendly
 public/
-  index.html         # Find / Price Check / List Your Services tabs
+  index.html         # Find / Price Check / List Your Services tabs, auth UI
   style.css
   app.js             # fetch() calls against the JSON API, no framework
+  terms.html, privacy.html   # Terms of Service / Privacy Policy
+  verify-email.html, verify-email.js  # the page a verification link opens
 test/
   workerService.test.js  # unit tests against the service layer directly
+  authService.test.js     # unit tests: signup, login, sessions, verification, deletion
   server.test.js         # integration tests against a real HTTP server
 docs/
   index.html, style.css, app.js  # a static build for GitHub Pages — see below
@@ -90,6 +102,16 @@ data resets on every redeploy or restart, and the service spins down after
 15 minutes idle and takes ~30 seconds to wake back up on the next request.
 Fine for a demo anyone can reach; for real persistence, swap in a managed
 Postgres/SQLite service (e.g. Render's paid disks, or Turso) later.
+
+**Email verification.** Without `RESEND_API_KEY` set as an environment
+variable, verification links aren't actually emailed — the API hands the
+link back directly (clearly marked `mode: "dev-log"`) and the frontend
+offers to verify the account with it right there, so the whole flow stays
+testable without a connected email account. Set `RESEND_API_KEY` (and
+optionally `EMAIL_FROM`) to send real email through
+[Resend](https://resend.com) — see `src/emailSender.js`; that integration
+follows Resend's documented API but hasn't been exercised against a real
+account in this environment, so test it before relying on it.
 
 **Why this runs on `node:sqlite` instead of `better-sqlite3`:** the first
 deploy attempt segfaulted immediately on start (`Segmentation fault (core
@@ -132,20 +154,31 @@ creates a SQLite file at `data/handyneighbors.db` on first run.
 
 ## API reference
 
+Auth is a session cookie (`hn_session`, HttpOnly, SameSite=Lax), set by
+signup/login and read on every request — no `Authorization` header to
+manage client-side.
+
 | Method | Path                          | Description |
 |--------|--------------------------------|--------------|
-| GET    | `/api/skills`                  | The fixed list of handyman skills (slug + name). |
-| GET    | `/api/equipment`                | The fixed list of equipment tags, each with a `category`. |
-| GET    | `/api/cities`                   | Every city/state with at least one listing: `workerCount` and `averageRate`, most-active-first. Powers the "Browse by City" strip. |
-| POST   | `/api/workers`                  | Create a listing. Returns `{ worker, editToken }` — the token is shown once. |
-| GET    | `/api/workers`                  | Search. Query params: `skill`, `equipment`, `city`, `state`, `minRate`, `maxRate`, `q`, `sortBy` (`newest` \| `rate_asc` \| `rate_desc` \| `rating_desc`). |
-| GET    | `/api/workers/:id`              | One worker's full profile, including skills, equipment, and rating. |
-| PUT    | `/api/workers/:id`               | Update a listing. Requires header `X-Edit-Token`. |
-| DELETE | `/api/workers/:id`               | Remove a listing. Requires header `X-Edit-Token`. |
-| GET    | `/api/price-check`               | Query params: `skill` (required), `city`, `state`. Returns `count`, `low`, `median`, `average`, `high`, and the matching workers sorted by rate. |
-| GET    | `/api/workers/:id/reviews`       | List reviews for a worker. |
-| POST   | `/api/workers/:id/reviews`       | Add a review: `{ authorName, rating (1-5), comment? }`. |
-| GET    | `/health`                        | Liveness check. |
+| POST   | `/api/auth/signup`             | `{ email, password (8+ chars), name, acceptedTerms: true }`. Creates the account, signs you in, and sends (or dev-logs) a verification email. `409` on a duplicate email. |
+| POST   | `/api/auth/login`               | `{ email, password }`. `401` for either a wrong email or wrong password (same message either way, so one can't be used to enumerate accounts). |
+| POST   | `/api/auth/logout`               | Destroys the current session. |
+| GET    | `/api/auth/me`                   | `{ user }` for the signed-in account, or `{ user: null }`. |
+| GET    | `/api/auth/verify-email`         | Query param `token`. Marks the account verified; the link a verification email points to. |
+| POST   | `/api/auth/resend-verification`  | Requires auth. Issues a fresh verification token/email. |
+| DELETE | `/api/auth/me`                   | Requires auth. Deletes the account and, via cascade, every listing/review/session it owns. |
+| GET    | `/api/skills`                    | The fixed list of handyman skills (slug + name). |
+| GET    | `/api/equipment`                 | The fixed list of equipment tags, each with a `category`. |
+| GET    | `/api/cities`                    | Every city/state with at least one listing: `workerCount` and `averageRate`, most-active-first. Powers the "Browse by City" strip. |
+| POST   | `/api/workers`                   | Requires auth + a verified email. Creates a listing owned by the signed-in account. |
+| GET    | `/api/workers`                   | Public. Search. Query params: `skill`, `equipment`, `city`, `state`, `minRate`, `maxRate`, `q`, `sortBy` (`newest` \| `rate_asc` \| `rate_desc` \| `rating_desc`). |
+| GET    | `/api/workers/:id`                | Public. One worker's full profile: skills, equipment, rating, `verified`, `memberSince`, `ownerId`. |
+| PUT    | `/api/workers/:id`                | Requires auth. `403` unless you own the listing. |
+| DELETE | `/api/workers/:id`                | Requires auth. `403` unless you own the listing. |
+| GET    | `/api/price-check`                | Public. Query params: `skill` (required), `city`, `state`. Returns `count`, `low`, `median`, `average`, `high`, and the matching workers sorted by rate. |
+| GET    | `/api/workers/:id/reviews`        | Public. List reviews for a worker. |
+| POST   | `/api/workers/:id/reviews`        | Requires auth + a verified email. `{ rating (1-5), comment? }` — the reviewer's name comes from their account, not free text. `400` on reviewing your own listing, `409` on a second review of the same listing. |
+| GET    | `/health`                         | Liveness check. |
 
 ## Running the tests
 
@@ -153,11 +186,14 @@ creates a SQLite file at `data/handyneighbors.db` on first run.
 npm test
 ```
 
-21 tests: service-level unit tests against an in-memory database (validation,
-search filters and sorting, city aggregation, price-matching math,
-edit-token enforcement), plus HTTP integration tests exercising the full
-create → search → price-check → review → update → delete lifecycle through
-a real Express server.
+40 tests: service-level unit tests against an in-memory database (worker
+validation, search filters and sorting, city aggregation, price-matching
+math, ownership enforcement) and against `authService` directly (signup
+validation, login, sessions, email verification, account deletion), plus
+HTTP integration tests exercising the full signup → verify → post →
+search → price-check → review → update → delete → delete-account
+lifecycle — cookies, ownership, and rate limiting included — through a
+real Express server.
 
 ## Design notes / trade-offs
 
@@ -176,11 +212,29 @@ a real Express server.
   informed by general research, not legal advice; run the actual Terms of
   Service and worker/user agreements past a real lawyer before taking this
   live.)
-- **One-time edit tokens instead of accounts.** No email/password auth to
-  build, salt, hash, reset, or leak. The token is generated with
-  `crypto.randomBytes(24)`, and only its SHA-256 hash is stored — compared
-  with `crypto.timingSafeEqual` — so the database never holds a usable
-  credential.
+- **Accounts, sessions, and passwords — all via Node's own `crypto`.**
+  Passwords are hashed with `scrypt` (a random 16-byte salt per user,
+  64-byte derived key, stored as `scrypt:<saltHex>:<hashHex>` so the
+  scheme is self-describing if it ever changes) and compared with
+  `crypto.timingSafeEqual`. Sessions are the same shape the old edit-token
+  model used: a `crypto.randomBytes(32)` token goes to the browser as an
+  HttpOnly, SameSite=Lax cookie, and only its SHA-256 hash is ever stored
+  — the database never holds a credential usable on its own. No
+  dependency (bcrypt, argon2, express-session) was needed for any of this.
+- **Email verification is real infrastructure with a pluggable last mile.**
+  Tokens, expiry (24h), and the "must be verified to post/review" gate are
+  all real and tested. What's pluggable is delivery: `src/emailSender.js`
+  sends through Resend if `RESEND_API_KEY` is set, and otherwise logs the
+  link and returns it in the API response instead of pretending to have
+  sent an email nobody can read — see *Live, shared version* above.
+- **A rate limiter and security headers, hand-rolled instead of two more
+  dependencies.** `/api/auth/login` and `/api/auth/signup` are capped at 20
+  attempts per 15 minutes per IP via an in-memory `Map` — the right amount
+  of machinery for a single free-tier instance; a real multi-instance
+  deployment would swap the store, not the API. Response headers
+  (`X-Frame-Options`, `X-Content-Type-Options`, a `Content-Security-Policy`
+  with no `'unsafe-inline'` for scripts) are ~15 lines instead of adding
+  `helmet` for a page with this few moving parts.
 - **A fixed skill/equipment vocabulary, not free text.** Search and the
   price-matching engine both depend on every worker picking from the same
   list of skills and equipment (seeded in `src/db.js`). Free-text tags

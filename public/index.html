@@ -19,8 +19,16 @@
         <button class="tab-btn" data-tab="post">List Your Services</button>
       </nav>
       <span class="free-badge">Free &amp; ad-free</span>
+      <span id="auth-area" class="auth-area"></span>
     </div>
   </header>
+
+  <div id="verify-banner" class="verify-banner" hidden>
+    <div class="wrap verify-banner-inner">
+      <span id="verify-banner-text"></span>
+      <button type="button" id="verify-banner-resend" class="btn btn-ghost btn-sm">Resend link</button>
+    </div>
+  </div>
 
   <main class="wrap">
 
@@ -132,7 +140,9 @@
         <p>No fees, no commission, no company required. Just you, your tools, and your rate. Payment happens directly between you and whoever hires you — HandyNeighbors never touches your money.</p>
       </div>
 
-      <form id="post-form" class="panel post-form">
+      <div id="post-gate" class="panel post-gate" hidden></div>
+
+      <form id="post-form" class="panel post-form" hidden>
         <div class="form-grid">
           <div class="field">
             <label for="post-name">Your name</label>
@@ -185,9 +195,7 @@
 
       <div id="post-success" class="panel post-success" hidden>
         <h2>You're live 🎉</h2>
-        <p>Save this edit key somewhere safe — it's the only way to update or remove your listing later. We don't ask for a password and we don't store one.</p>
-        <code id="post-token" class="token-box"></code>
-        <button type="button" id="copy-token" class="btn btn-ghost">Copy edit key</button>
+        <p>Your listing is up — you can edit or remove it any time you're signed in, from its listing page.</p>
         <p><a href="#" id="view-listing-link">View your listing →</a></p>
       </div>
     </section>
@@ -202,9 +210,18 @@
     </div>
   </div>
 
+  <!-- Sign up / log in modal -->
+  <div id="auth-modal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+      <button type="button" id="auth-modal-close" class="modal-close" aria-label="Close">✕</button>
+      <div id="auth-modal-body"></div>
+    </div>
+  </div>
+
   <footer class="site-footer">
     <div class="wrap footer-content">
-      <p><strong>HandyNeighbors</strong> is a free directory — it lists independent workers and lets you compare local prices. It is not an employer, contractor, escrow service, or payment processor. Workers listed here are independent individuals, not employees of HandyNeighbors, and are not verified, licensed, bonded, or insured by this platform. Arrange payment and confirm any needed licensing directly with the person you hire.</p>
+      <p><strong>HandyNeighbors</strong> is a free directory — it lists independent workers and lets you compare local prices. It is not an employer, contractor, escrow service, or payment processor. Workers listed here are independent individuals, not employees of HandyNeighbors, and are not licensed, bonded, or insured by this platform. A "Verified" badge means only that we confirmed the listed email address belongs to that account — it is not a background check, identity check, or license check. Arrange payment and confirm any needed licensing directly with the person you hire.</p>
+      <p><a href="/terms.html">Terms of Service</a> · <a href="/privacy.html">Privacy Policy</a></p>
     </div>
   </footer>
 

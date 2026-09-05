@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Privacy Policy — HandyNeighbors</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .legal { max-width: 720px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
+    .legal h1 { font-size: 1.7rem; }
+    .legal h2 { font-size: 1.15rem; margin-top: 2rem; }
+    .legal p, .legal li { color: var(--text); }
+    .legal .notice { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 2rem; color: var(--muted); font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <main class="legal">
+    <p><a href="/#find">← Back to HandyNeighbors</a></p>
+    <h1>Privacy Policy</h1>
+    <p class="notice"><strong>This is a draft, not reviewed by a lawyer.</strong> It's written to plainly and accurately describe what this portfolio project's code actually does with your data, based on reading that code — not to satisfy every jurisdiction's privacy law. Before real users rely on this at any scale, it should be reviewed by an actual attorney.</p>
+
+    <h2>What we collect</h2>
+    <ul>
+      <li><strong>Account info:</strong> your email, name, and password. Your password is never stored directly — only a salted hash (via Node's <code>scrypt</code>) that can't be reversed back into your password.</li>
+      <li><strong>Listing and review content:</strong> whatever you type into a listing or review — bio, rate, skills, equipment, contact info, comments.</li>
+      <li><strong>A session cookie:</strong> a random token (not your email or password) that keeps you signed in. It's marked HttpOnly (not readable by page scripts) and SameSite (not sent cross-site).</li>
+      <li><strong>Rate-limit tracking:</strong> your IP address is briefly held in server memory to slow down repeated login/signup attempts. It's never written to the database and clears whenever the server restarts.</li>
+    </ul>
+    <p>HandyNeighbors runs no analytics and no ads, so there's no third-party tracking to disclose.</p>
+
+    <h2>How it's used</h2>
+    <p>Your account data authenticates you and attributes your listings/reviews to your account. Your listing's contact info is shown to anyone who views it — that's the point of posting it — so only put information there you're comfortable making public. Your email is used to send a one-time verification link when a real email provider is configured (see below); it's otherwise not emailed for anything else.</p>
+
+    <h2>Email verification</h2>
+    <p>Depending on how this deployment is configured, verification links are either sent through a real email provider or, if none is connected, logged to the server and shown to you directly in the app. Either way, the verification link itself is a security-sensitive token — don't share it.</p>
+
+    <h2>Sharing</h2>
+    <p>HandyNeighbors doesn't sell or share your account data with third parties. It's not a lead-generation service — no one else receives your contact info unless you choose to post it on a public listing.</p>
+
+    <h2>Deleting your data</h2>
+    <p>You can permanently delete your account at any time from the "Delete account" button next to your name once signed in. This immediately and permanently removes your account, every listing you posted, and every review you left. This can't be undone, and there's no recovery window.</p>
+
+    <h2>Changes</h2>
+    <p>This policy may change as the project changes. Check back here for updates.</p>
+
+    <h2>Contact</h2>
+    <p>This is a portfolio project built by Samuel McMillan. See the project's GitHub repository for contact information.</p>
+  </main>
+</body>
+</html>

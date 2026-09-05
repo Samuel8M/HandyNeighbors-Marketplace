@@ -113,6 +113,67 @@ a { color: var(--accent); }
   white-space: nowrap;
 }
 
+/* ---------- Auth area (header) ---------- */
+
+.auth-area { display: flex; align-items: center; gap: 0.5rem; }
+
+.auth-user-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.auth-user-name { color: var(--text); }
+
+.btn-sm { padding: 0.35rem 0.8rem; font-size: 0.82rem; }
+
+/* ---------- Verify-your-email banner ---------- */
+
+.verify-banner {
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+}
+
+.verify-banner-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 1.25rem;
+  font-size: 0.87rem;
+  color: var(--accent);
+}
+
+.verify-banner-inner a { font-weight: 700; }
+
+/* ---------- Post gate (signed out / unverified) ---------- */
+
+.post-gate { text-align: center; padding: 2.5rem 1.5rem; }
+.post-gate h2 { margin: 0 0 0.5rem; }
+.post-gate p { color: var(--muted); margin: 0 0 1.25rem; }
+.post-gate .btn-row { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; }
+
+/* ---------- Auth forms (sign up / log in) ---------- */
+
+.auth-form { display: flex; flex-direction: column; gap: 1rem; }
+.auth-form h2 { margin: 0; }
+.auth-form .field { width: 100%; }
+
+.auth-terms-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--text);
+}
+.auth-terms-check input { margin-top: 0.2rem; }
+
+.auth-switch { font-size: 0.88rem; color: var(--muted); text-align: center; margin: 0; }
+
 /* ---------- Layout / tabs ---------- */
 
 main.wrap { padding-top: 2rem; padding-bottom: 4rem; }
@@ -339,6 +400,17 @@ textarea { resize: vertical; }
   background: var(--equip-soft);
   color: var(--equip);
 }
+
+.verified-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: transparent;
+  color: var(--success);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.verified-badge::before { content: "✓"; }
 
 .card-section-label {
   font-size: 0.72rem;

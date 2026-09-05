@@ -105,10 +105,37 @@ function createDb(filePath) {
       category TEXT NOT NULL DEFAULT ''
     );
 
-    -- One row per individual worker. No "company" field on purpose: the
-    -- platform lists people, not businesses.
+    -- A real account: every listing and review is owned by one of these.
+    -- password_hash is 'scrypt:<saltHex>:<derivedKeyHex>' (see
+    -- authService.js) — never a plaintext password, never reversible.
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      name TEXT NOT NULL,
+      email_verified INTEGER NOT NULL DEFAULT 0,
+      verification_token_hash TEXT,
+      verification_sent_at TEXT,
+      accepted_terms_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+
+    -- A session is a long random token handed to the browser as a cookie;
+    -- only its SHA-256 hash is ever stored, same pattern as the old
+    -- edit-token model this replaces (see git history).
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      expires_at TEXT NOT NULL
+    );
+
+    -- One row per individual worker, owned by the account that posted it.
+    -- No "company" field on purpose: the platform lists people, not
+    -- businesses.
     CREATE TABLE IF NOT EXISTS workers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       bio TEXT NOT NULL DEFAULT '',
       hourly_rate REAL NOT NULL,
@@ -117,7 +144,6 @@ function createDb(filePath) {
       service_radius_miles INTEGER NOT NULL DEFAULT 10,
       contact_email TEXT,
       contact_phone TEXT,
-      edit_token_hash TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
       updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
@@ -134,22 +160,36 @@ function createDb(filePath) {
       PRIMARY KEY (worker_id, equipment_id)
     );
 
+    -- author_name is copied from the reviewer's account name at write time
+    -- (denormalized so listing a worker's reviews never needs a join), but
+    -- user_id is the real identity behind it: it's what enforces "one
+    -- review per person per listing" and "can't review your own listing".
     CREATE TABLE IF NOT EXISTS reviews (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       worker_id INTEGER NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       author_name TEXT NOT NULL,
       rating INTEGER NOT NULL,
       comment TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      UNIQUE (worker_id, user_id)
     );
 
     CREATE INDEX IF NOT EXISTS idx_worker_skills_skill ON worker_skills(skill_id);
     CREATE INDEX IF NOT EXISTS idx_worker_equipment_equipment ON worker_equipment(equipment_id);
     CREATE INDEX IF NOT EXISTS idx_workers_city_state ON workers(city, state);
     CREATE INDEX IF NOT EXISTS idx_reviews_worker ON reviews(worker_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email);
   `);
+  // idx_workers_user and idx_reviews_worker_user reference columns
+  // (user_id) that a pre-accounts database won't have yet — they're
+  // created inside the migration below, after it adds that column,
+  // rather than here (a fresh database already has the column from the
+  // CREATE TABLE above, so creating the index there too is still safe).
 
   migrateEquipmentCategory(db);
+  migrateWorkersAndReviewsToAccounts(db);
   seedSkills(db);
   seedEquipment(db);
 
@@ -163,6 +203,39 @@ function migrateEquipmentCategory(db) {
   if (columns.length > 0 && !columns.some((c) => c.name === 'category')) {
     db.exec("ALTER TABLE equipment ADD COLUMN category TEXT NOT NULL DEFAULT ''");
   }
+}
+
+// Databases created before accounts existed had anonymous listings/reviews
+// (an edit_token_hash instead of a user_id). Rather than lose that data,
+// add user_id as nullable — those old rows just become unowned/orphaned
+// (no one can edit them via the API, but they still display) — and drop
+// the now-unused edit_token_hash column. DROP COLUMN needs SQLite >=3.35,
+// which every Node version new enough to have node:sqlite bundles.
+function migrateWorkersAndReviewsToAccounts(db) {
+  const workerColumns = db.prepare('PRAGMA table_info(workers)').all();
+  if (workerColumns.length > 0) {
+    if (!workerColumns.some((c) => c.name === 'user_id')) {
+      db.exec('ALTER TABLE workers ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
+    }
+    if (workerColumns.some((c) => c.name === 'edit_token_hash')) {
+      db.exec('ALTER TABLE workers DROP COLUMN edit_token_hash');
+    }
+  }
+
+  const reviewColumns = db.prepare('PRAGMA table_info(reviews)').all();
+  if (reviewColumns.length > 0 && !reviewColumns.some((c) => c.name === 'user_id')) {
+    db.exec('ALTER TABLE reviews ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
+  }
+
+  // Created here (not in the main schema block above) because these
+  // reference user_id, which a pre-accounts database only has as of the
+  // ALTER TABLE calls just above — a fresh database already has the
+  // column from its CREATE TABLE, so creating the index here too is
+  // still correct either way. Old reviews have no user_id, but SQLite
+  // treats every NULL as distinct in a unique index, so the constraint is
+  // safe to add even with many existing NULL-user_id rows.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_workers_user ON workers(user_id)');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_reviews_worker_user ON reviews(worker_id, user_id)');
 }
 
 function seedSkills(db) {
