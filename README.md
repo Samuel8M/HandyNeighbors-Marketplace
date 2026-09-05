@@ -212,12 +212,31 @@ manage client-side.
 | GET    | `/api/price-check`                | Public. Query params: `skill` (required), `city`, `state`. Returns `count`, `low`, `median`, `average`, `high`, and the matching workers sorted by rate. |
 | GET    | `/api/workers/:id/reviews`        | Public. List reviews for a worker. |
 | POST   | `/api/workers/:id/reviews`        | Requires auth + a verified email + not suspended. `{ rating (1-5), comment? }` — the reviewer's name comes from their account, not free text. `400` on reviewing your own listing, `409` on a second review of the same listing. |
+| POST   | `/api/users/:id/rate`             | Requires auth + a verified email + not suspended. `{ rating (1-5), comment? }` — rates a *customer* back. `403` unless that customer has reviewed one of your own listings, `409` on a second rating of the same person. |
+| GET    | `/api/users/:id/rating`           | Public. `{ average, count }` — a user's rating as a customer. |
 | POST   | `/api/reports`                    | Requires auth + a verified email. `{ targetType: 'worker' \| 'review', targetId, reason, details? }`. `reason` is one of `spam`, `scam_or_fraud`, `inappropriate_content`, `harassment`, `fake_listing`, `other`. `400` on reporting your own content. |
 | GET    | `/api/admin/reports`              | Admin only (`403` otherwise). Optional `?status=open\|dismissed\|actioned`. |
 | POST   | `/api/admin/reports/:id/action`   | Admin only. `{ action: 'dismiss' \| 'delete_content' \| 'ban_user' \| 'delete_and_ban' }`. |
 | GET    | `/api/admin/banned-users`         | Admin only. Currently-suspended accounts. |
 | POST   | `/api/admin/banned-users/:id/unban` | Admin only. Lifts a suspension. |
 | GET    | `/health`                         | Liveness check. |
+
+## Two-sided ratings
+
+Reviews only ever covered one direction: a customer rating a worker's
+listing. `src/ratingService.js` adds the other half — a worker can rate
+*back* the specific customer who reviewed one of their listings, the way
+Airbnb has both a host and a guest leave each other a review after a stay.
+There's no booking/messaging system to check against, so (same as reviews
+already do) "left a review on my listing" is the platform's only proxy
+for "we actually interacted" — `rateCustomer` enforces that a review link
+exists before allowing a rating, blocks rating yourself, and allows only
+one rating per customer per worker (`409` on a repeat).
+
+A customer's resulting `{ average, count }` (`GET /api/users/:id/rating`)
+shows up everywhere their name does: next to each of their reviews, and
+in their own header chip once signed in — every account builds a visible
+track record, not just the ones posting listings.
 
 ## Content moderation (reports, bans, and the admin console)
 
@@ -243,15 +262,17 @@ questions (reporting and blocking user-generated content) — see
 npm test
 ```
 
-50 tests: service-level unit tests against an in-memory database (worker
+55 tests: service-level unit tests against an in-memory database (worker
 validation, search filters and sorting, city aggregation, price-matching
-math, ownership enforcement, reports/moderation actions) and against
-`authService` directly (signup validation, login, sessions, email
-verification, account deletion), plus HTTP integration tests exercising
-the full signup → verify → post → search → price-check → review → update
-→ delete → delete-account lifecycle, reporting content, and the
-admin-only moderation routes (gated by `ADMIN_EMAILS`) — cookies,
-ownership, and rate limiting included — through a real Express server.
+math, ownership enforcement, reports/moderation actions, two-sided
+customer ratings) and against `authService` directly (signup validation,
+login, sessions, email verification, account deletion), plus HTTP
+integration tests exercising the full signup → verify → post → search →
+price-check → review → update → delete → delete-account lifecycle,
+reporting content, the admin-only moderation routes (gated by
+`ADMIN_EMAILS`), and a worker rating back a customer who reviewed
+them — cookies, ownership, and rate limiting included — through a real
+Express server.
 
 ## Design notes / trade-offs
 

@@ -555,6 +555,13 @@ textarea { resize: vertical; }
 
 .report-form { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; padding: 0.6rem; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
 .report-form .btn-row { display: flex; gap: 0.5rem; }
+.rate-form { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.5rem; padding: 0.6rem; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.rate-form .btn-row { display: flex; gap: 0.5rem; }
+
+/* A person's rating as a customer — same idea as a worker listing's star
+   rating, just muted/inline since it's secondary to whatever it sits next
+   to (a review, an account name). */
+.cust-rating { color: var(--muted); font-size: 0.8rem; margin-left: 0.35rem; }
 
 /* ---------- Footer ---------- */
 

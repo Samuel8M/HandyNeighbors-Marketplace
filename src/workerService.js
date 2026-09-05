@@ -360,15 +360,19 @@ function addReview(db, userId, workerId, input) {
     throw err;
   }
 
-  return db.prepare('SELECT id, author_name AS authorName, rating, comment, created_at AS createdAt FROM reviews WHERE id = ?')
+  return db.prepare('SELECT id, user_id AS reviewerId, author_name AS authorName, rating, comment, created_at AS createdAt FROM reviews WHERE id = ?')
     .get(info.lastInsertRowid);
 }
 
+// reviewerId (not just the denormalized authorName) is what lets the
+// worker who owns this listing rate that reviewer back — see
+// ratingService.rateCustomer, which checks for a review row exactly like
+// these joining the two accounts.
 function listReviews(db, workerId) {
   const worker = db.prepare('SELECT id FROM workers WHERE id = ?').get(workerId);
   if (!worker) throw new WorkerServiceError(404, 'Worker not found');
   return db.prepare(`
-    SELECT id, author_name AS authorName, rating, comment, created_at AS createdAt
+    SELECT id, user_id AS reviewerId, author_name AS authorName, rating, comment, created_at AS createdAt
     FROM reviews WHERE worker_id = ? ORDER BY created_at DESC
   `).all(workerId);
 }

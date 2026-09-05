@@ -334,7 +334,13 @@
         api(`/api/workers/${id}`),
         api(`/api/workers/${id}/reviews`),
       ]);
-      body.innerHTML = renderWorkerDetail(worker, reviews);
+      // Each review's author gets their own "as a customer" rating shown
+      // alongside it — the same track record a worker's listing has,
+      // applied to whoever's doing the reviewing.
+      const reviewsWithRatings = await Promise.all(reviews.map(async (r) => ({
+        ...r, customerRating: await api(`/api/users/${r.reviewerId}/rating`),
+      })));
+      body.innerHTML = renderWorkerDetail(worker, reviewsWithRatings);
 
       const reviewForm = $('#review-form', body);
       if (reviewForm) {
@@ -448,6 +454,74 @@
     });
   }
 
+  // ---------- Rating customers ----------
+  // The other half of the review system: a worker can rate back anyone
+  // who reviewed one of their own listings (server-enforced — see
+  // ratingService.rateCustomer). Same trigger/form/wire pattern as
+  // reporting, just a different endpoint and payload shape.
+
+  function customerRatingBadgeHtml(summary) {
+    if (!summary || summary.count === 0) return '';
+    return ` <span class="cust-rating" title="This person's rating as a customer">★${summary.average} as a customer (${summary.count})</span>`;
+  }
+
+  function rateTriggerHtml(userId) {
+    return `<button type="button" class="link-btn rate-trigger" data-user-id="${userId}">Rate this customer</button>`;
+  }
+
+  function rateFormHtml(userId) {
+    return `
+      <form class="rate-form" data-user-id="${userId}">
+        <div class="field">
+          <label>Rate this customer</label>
+          <select name="rating" required>
+            <option value="5">★★★★★</option>
+            <option value="4">★★★★☆</option>
+            <option value="3">★★★☆☆</option>
+            <option value="2">★★☆☆☆</option>
+            <option value="1">★☆☆☆☆</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Comment (optional)</label>
+          <textarea name="comment" rows="2" maxlength="1000"></textarea>
+        </div>
+        <div class="btn-row">
+          <button type="submit" class="btn btn-primary btn-sm">Submit rating</button>
+          <button type="button" class="btn btn-ghost btn-sm rate-cancel">Cancel</button>
+        </div>
+      </form>
+    `;
+  }
+
+  function wireRatingLinks(root) {
+    root.addEventListener('click', (e) => {
+      const trigger = e.target.closest('.rate-trigger');
+      if (trigger) {
+        trigger.outerHTML = rateFormHtml(trigger.dataset.userId);
+        return;
+      }
+      const cancel = e.target.closest('.rate-cancel');
+      if (cancel) {
+        const form = cancel.closest('.rate-form');
+        form.outerHTML = rateTriggerHtml(form.dataset.userId);
+      }
+    });
+
+    root.addEventListener('submit', async (e) => {
+      const form = e.target.closest('.rate-form');
+      if (!form) return;
+      e.preventDefault();
+      const userId = form.dataset.userId;
+      await withLoadingButton(form, 'Submitting…', async () => {
+        const data = Object.fromEntries(new FormData(form).entries());
+        data.rating = Number(data.rating);
+        await api(`/api/users/${userId}/rate`, { method: 'POST', body: JSON.stringify(data) });
+        form.outerHTML = '<span class="field-hint">Rated — thanks.</span>';
+      });
+    });
+  }
+
   function groupByCategory(items) {
     const map = new Map();
     for (const item of items) {
@@ -472,18 +546,24 @@
       w.contactEmail ? `<div>✉️ ${escapeHtml(w.contactEmail)}</div>` : '',
       w.contactPhone ? `<div>📞 ${escapeHtml(w.contactPhone)}</div>` : '',
     ].join('');
+    const isOwner = state.currentUser && state.currentUser.id === w.ownerId;
     const canReport = state.currentUser && state.currentUser.emailVerified;
+    // Only the listing's owner can rate the people who reviewed it — the
+    // server enforces this too (ratingService.rateCustomer), this just
+    // avoids showing a trigger that would 403.
+    const canRateReviewers = isOwner;
     const reviewItems = reviews.length
       ? reviews.map((r) => `
           <li data-review-row="${r.id}">
             <strong>${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</strong>
             — ${escapeHtml(r.authorName)}${r.comment ? `: ${escapeHtml(r.comment)}` : ''}
+            ${customerRatingBadgeHtml(r.customerRating)}
             ${canReport ? reportTriggerHtml('review', r.id) : ''}
+            ${canRateReviewers ? rateTriggerHtml(r.reviewerId) : ''}
           </li>
         `).join('')
       : '<li>No reviews yet.</li>';
 
-    const isOwner = state.currentUser && state.currentUser.id === w.ownerId;
     const reviewSection = isOwner
       ? '<p class="field-hint">This is your listing — you can\'t review your own work.</p>'
       : !state.currentUser
@@ -572,6 +652,7 @@
     // so wiring it again per-render would stack duplicate handlers instead
     // of replacing anything.
     wireReportLinks($('#modal-body'));
+    wireRatingLinks($('#modal-body'));
   }
 
   // ---------- Auth ----------
@@ -593,7 +674,7 @@
     area.innerHTML = `
       <span class="auth-user-chip">
         ${state.currentUser.isAdmin ? '<a class="btn btn-ghost btn-sm" href="/admin.html">Admin</a>' : ''}
-        <span class="auth-user-name">${escapeHtml(state.currentUser.name)}</span>
+        <span class="auth-user-name">${escapeHtml(state.currentUser.name)}${customerRatingBadgeHtml(state.currentUser.customerRating)}</span>
         <button type="button" class="btn btn-ghost btn-sm" id="nav-logout">Log out</button>
         <button type="button" class="btn btn-ghost btn-sm" id="nav-delete-account" title="Permanently delete your account, listings, and reviews">Delete account</button>
       </span>

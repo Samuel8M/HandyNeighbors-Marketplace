@@ -7,10 +7,12 @@ const { createDb } = require('./db');
 const svc = require('./workerService');
 const authSvc = require('./authService');
 const modSvc = require('./moderationService');
+const ratingSvc = require('./ratingService');
 const { createEmailSender } = require('./emailSender');
 const { WorkerServiceError } = svc;
 const { AuthError } = authSvc;
 const { ModerationError } = modSvc;
+const { RatingError } = ratingSvc;
 
 const SESSION_COOKIE = 'hn_session';
 
@@ -174,6 +176,14 @@ function createApp(db, options = {}) {
     return `${req.protocol}://${req.get('host')}/verify-email.html?token=${encodeURIComponent(token)}`;
   }
 
+  // Every user-facing response attaches the account's own "as a customer"
+  // rating (see ratingService) so the header chip and account state can
+  // show it — the same track record a worker's listing already has,
+  // applied to the account itself.
+  function withCustomerRating(user) {
+    return user ? { ...user, customerRating: ratingSvc.getUserRatingSummary(db, user.id) } : null;
+  }
+
   app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
   });
@@ -184,7 +194,7 @@ function createApp(db, options = {}) {
     try {
       const result = await authSvc.signup(db, req.body || {}, (email, token) => sendVerificationEmail(email, verifyUrlFor(req, token)));
       setSessionCookie(req, res, result.session);
-      res.status(201).json({ user: result.user, verification: result.verification });
+      res.status(201).json({ user: withCustomerRating(result.user), verification: result.verification });
     } catch (err) {
       next(err);
     }
@@ -194,7 +204,7 @@ function createApp(db, options = {}) {
     try {
       const result = authSvc.login(db, req.body || {});
       setSessionCookie(req, res, result.session);
-      res.json({ user: result.user });
+      res.json({ user: withCustomerRating(result.user) });
     } catch (err) {
       next(err);
     }
@@ -207,7 +217,7 @@ function createApp(db, options = {}) {
   });
 
   app.get('/api/auth/me', (req, res) => {
-    res.json({ user: req.user });
+    res.json({ user: withCustomerRating(req.user) });
   });
 
   // Deletes the account and, via ON DELETE CASCADE, every listing,
@@ -325,6 +335,22 @@ function createApp(db, options = {}) {
     }
   });
 
+  // ---------- Customer ratings (the other half of reviews: lets a worker
+  // rate a customer who has reviewed one of their own listings) ----------
+
+  app.post('/api/users/:id/rate', requireAuth, requireVerified, requireNotBanned, (req, res, next) => {
+    try {
+      const rating = ratingSvc.rateCustomer(db, req.user.id, Number(req.params.id), req.body || {});
+      res.status(201).json(rating);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get('/api/users/:id/rating', (req, res) => {
+    res.json(ratingSvc.getUserRatingSummary(db, Number(req.params.id)));
+  });
+
   // ---------- Reports (Play Console "User Content Sharing": lets anyone
   // flag a listing or review; requireAdmin routes just below are what
   // actually act on them) ----------
@@ -373,7 +399,7 @@ function createApp(db, options = {}) {
   // 500.
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
-    if (err instanceof WorkerServiceError || err instanceof AuthError || err instanceof ModerationError) {
+    if (err instanceof WorkerServiceError || err instanceof AuthError || err instanceof ModerationError || err instanceof RatingError) {
       return res.status(err.status).json({ error: err.message });
     }
     console.error(err);

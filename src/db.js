@@ -202,6 +202,24 @@ function createDb(filePath) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
+
+    -- The other half of the review system: lets the *worker* rate the
+    -- *customer* back, the same way a review lets a customer rate a
+    -- worker. See ratingService.js — a rating is only allowed from
+    -- someone whose listing the ratee has actually reviewed, which is
+    -- this platform's only proxy for "an interaction really happened"
+    -- (there's no booking/messaging system to check against instead).
+    CREATE TABLE IF NOT EXISTS user_ratings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rater_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      ratee_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      rating INTEGER NOT NULL,
+      comment TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      UNIQUE (rater_user_id, ratee_user_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_ratings_ratee ON user_ratings(ratee_user_id);
     CREATE INDEX IF NOT EXISTS idx_worker_skills_skill ON worker_skills(skill_id);
     CREATE INDEX IF NOT EXISTS idx_worker_equipment_equipment ON worker_equipment(equipment_id);
     CREATE INDEX IF NOT EXISTS idx_workers_city_state ON workers(city, state);

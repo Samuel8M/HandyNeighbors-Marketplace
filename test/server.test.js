@@ -372,6 +372,45 @@ test('admin routes: gated by ADMIN_EMAILS, and acting on a report can ban the li
   }
 });
 
+test('customer ratings: a worker can rate back a reviewer, but only once, and /api/auth/me reflects it', async () => {
+  const { server, baseUrl, sendVerificationEmail } = startServer();
+  try {
+    const owner = await signUpAndVerify(baseUrl, sendVerificationEmail, { name: 'Owner Olive' });
+    const created = await request(baseUrl, 'POST', '/api/workers', { body: workerPayload(), cookie: owner.cookie });
+    const workerId = created.body.worker.id;
+
+    const customer = await signUpAndVerify(baseUrl, sendVerificationEmail, { name: 'Customer Cam' });
+
+    // Can't rate before any review links them.
+    const tooSoon = await request(baseUrl, 'POST', `/api/users/${customer.user.id}/rate`, {
+      body: { rating: 5 }, cookie: owner.cookie,
+    });
+    assert.equal(tooSoon.status, 403);
+
+    await request(baseUrl, 'POST', `/api/workers/${workerId}/reviews`, {
+      body: { rating: 5, comment: 'Great work' }, cookie: customer.cookie,
+    });
+
+    const rated = await request(baseUrl, 'POST', `/api/users/${customer.user.id}/rate`, {
+      body: { rating: 4, comment: 'Easy to work with' }, cookie: owner.cookie,
+    });
+    assert.equal(rated.status, 201);
+
+    const dupe = await request(baseUrl, 'POST', `/api/users/${customer.user.id}/rate`, {
+      body: { rating: 3 }, cookie: owner.cookie,
+    });
+    assert.equal(dupe.status, 409);
+
+    const summary = await request(baseUrl, 'GET', `/api/users/${customer.user.id}/rating`);
+    assert.deepEqual(summary.body, { average: 4, count: 1 });
+
+    const me = await request(baseUrl, 'GET', '/api/auth/me', { cookie: customer.cookie });
+    assert.deepEqual(me.body.user.customerRating, { average: 4, count: 1 });
+  } finally {
+    server.close();
+  }
+});
+
 test('login is rate-limited after repeated attempts', async () => {
   const { server, baseUrl } = startServer();
   try {
