@@ -1,0 +1,41 @@
+name: Keep HandyNeighbors warm
+
+# Render's free plan spins the app down after ~15 minutes with no
+# traffic, so the first visitor after that eats a ~10-15s cold start.
+# Pinging /health regularly prevents that spin-down — but Render's free
+# tier also caps the WHOLE account at 750 instance-hours/month, and
+# pinging around the clock would burn nearly all 750 hours by itself,
+# leaving almost no room for a longer month or any manual restarts
+# before the app gets suspended for the rest of the month.
+#
+# So this only pings during an "active" window (roughly morning through
+# evening US Eastern) and lets the app sleep overnight, landing around
+# ~420 hours/month — comfortably under the cap. Widen ACTIVE_START_UTC /
+# ACTIVE_END_UTC below if real traffic patterns turn out to need it.
+#
+# GitHub auto-disables scheduled workflows after 60 days with no commits
+# to the repo — if pings ever silently stop, that's why; a small commit
+# (or manually re-enabling it under the Actions tab) fixes it.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health if inside the active window
+        env:
+          ACTIVE_START_UTC: 11 # ~7am US Eastern (EDT)
+          ACTIVE_END_UTC: 1    # ~9pm US Eastern (EDT) — wraps past midnight UTC
+        run: |
+          hour=$(date -u +%-H)
+          if [ "$hour" -ge "$ACTIVE_START_UTC" ] || [ "$hour" -lt "$ACTIVE_END_UTC" ]; then
+            echo "In active window ($hour:00 UTC) — pinging."
+            curl -sf -o /dev/null -w "response time: %{time_total}s\n" https://handyneighbors.onrender.com/health \
+              || echo "Ping failed (app may be mid-restart) — non-fatal."
+          else
+            echo "Outside active window ($hour:00 UTC) — skipping so the app can sleep and stay under Render's free-tier hour cap."
+          fi
