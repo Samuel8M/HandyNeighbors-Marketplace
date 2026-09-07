@@ -19,13 +19,37 @@ function fakeEmailSender() {
   return sender;
 }
 
-function startServer() {
+function startServer(options = {}) {
   const db = createDb(':memory:');
   const sendVerificationEmail = fakeEmailSender();
-  const app = createApp(db, { sendVerificationEmail });
+  const app = createApp(db, { sendVerificationEmail, ...options });
   const server = app.listen(0);
   const { port } = server.address();
   return { server, baseUrl: `http://127.0.0.1:${port}`, sendVerificationEmail };
+}
+
+// A stand-in for @duosecurity/duo_universal's Client, injected into
+// createApp() the same way fakeEmailSender() is — see duoService.js.
+// exchangeAuthorizationCodeFor2FAResult only succeeds for 'good-code',
+// mirroring how the real SDK rejects a wrong/tampered code.
+function fakeDuoClient() {
+  let counter = 0;
+  return {
+    calls: { createAuthUrl: 0, exchange: 0 },
+    generateState() {
+      counter += 1;
+      return `state-${counter}`;
+    },
+    async createAuthUrl(username, state) {
+      this.calls.createAuthUrl += 1;
+      return `https://fake-duo.example/prompt?username=${encodeURIComponent(username)}&state=${state}`;
+    },
+    async exchangeAuthorizationCodeFor2FAResult(duoCode) {
+      this.calls.exchange += 1;
+      if (duoCode !== 'good-code') throw new Error('bad code');
+      return { auth_result: { status: 'allow' } };
+    },
+  };
 }
 
 function extractCookie(res) {
@@ -422,6 +446,87 @@ test('login is rate-limited after repeated attempts', async () => {
     }
     assert.equal(last.status, 429);
   } finally {
+    server.close();
+  }
+});
+
+// Admins carry moderation/ban power, so — unlike everyone else — their
+// login goes through Duo 2FA once it's configured (duoClient injected
+// here the same way sendVerificationEmail is). Covers both the website
+// (Lax cookie, redirect to '/') and the bundled Android app (None+Secure
+// cookie, redirect to https://localhost) — see duoService.js/server.js.
+test('admin login requires Duo 2FA; everyone else is unaffected', async () => {
+  const previousAdminEmails = process.env.ADMIN_EMAILS;
+  const duo = fakeDuoClient();
+  const { server, baseUrl } = startServer({ duoClient: duo });
+  try {
+    const adminPayload = signupPayload({ name: 'Admin Andy' });
+    process.env.ADMIN_EMAILS = adminPayload.email;
+    await request(baseUrl, 'POST', '/api/auth/signup', { body: adminPayload });
+
+    // Website login: password check succeeds, but it's a Duo redirect,
+    // not a completed session.
+    const webLogin = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: adminPayload.email, password: adminPayload.password }),
+    });
+    const webBody = await webLogin.json();
+    assert.ok(webBody.duoRedirectUrl);
+    assert.equal(webLogin.headers.get('set-cookie'), null);
+    const webState = new URL(webBody.duoRedirectUrl).searchParams.get('state');
+
+    // Duo redirects back with the wrong code: rejected, no cookie.
+    const badCallback = await fetch(`${baseUrl}/api/auth/duo/callback?state=${webState}&duo_code=wrong-code`, { redirect: 'manual' });
+    assert.equal(badCallback.status, 401);
+
+    // Right code, but the state was already consumed by the attempt above
+    // (one-time use regardless of outcome) — still rejected.
+    const reusedState = await fetch(`${baseUrl}/api/auth/duo/callback?state=${webState}&duo_code=good-code`, { redirect: 'manual' });
+    assert.equal(reusedState.status, 400);
+
+    // A fresh attempt, completed correctly this time: Lax cookie, redirect to '/'.
+    const webLogin2 = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: adminPayload.email, password: adminPayload.password }),
+    });
+    const webState2 = new URL((await webLogin2.json()).duoRedirectUrl).searchParams.get('state');
+    const webCallback = await fetch(`${baseUrl}/api/auth/duo/callback?state=${webState2}&duo_code=good-code`, { redirect: 'manual' });
+    assert.equal(webCallback.status, 302);
+    assert.equal(webCallback.headers.get('location'), '/?source=duo#find');
+    assert.match(webCallback.headers.get('set-cookie'), /SameSite=Lax/i);
+    assert.doesNotMatch(webCallback.headers.get('set-cookie'), /SameSite=None/i);
+
+    // Same dance from the bundled app's origin: None+Secure cookie,
+    // redirect back to the local app shell instead of the live website.
+    const appLogin = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://localhost' },
+      body: JSON.stringify({ email: adminPayload.email, password: adminPayload.password }),
+    });
+    const appState = new URL((await appLogin.json()).duoRedirectUrl).searchParams.get('state');
+    const appCallback = await fetch(`${baseUrl}/api/auth/duo/callback?state=${appState}&duo_code=good-code`, { redirect: 'manual' });
+    assert.equal(appCallback.status, 302);
+    assert.equal(appCallback.headers.get('location'), 'https://localhost/?source=duo#find');
+    assert.match(appCallback.headers.get('set-cookie'), /SameSite=None/i);
+    assert.match(appCallback.headers.get('set-cookie'), /Secure/i);
+
+    assert.equal(duo.calls.createAuthUrl, 3);
+    assert.equal(duo.calls.exchange, 3);
+
+    // A regular (non-admin) login never touches Duo at all.
+    const regularPayload = signupPayload({ name: 'Regular Rae' });
+    await request(baseUrl, 'POST', '/api/auth/signup', { body: regularPayload });
+    const regularLogin = await request(baseUrl, 'POST', '/api/auth/login', {
+      body: { email: regularPayload.email, password: regularPayload.password },
+    });
+    assert.equal(regularLogin.body.duoRedirectUrl, undefined);
+    assert.ok(regularLogin.cookie);
+    assert.equal(duo.calls.createAuthUrl, 3);
+    assert.equal(duo.calls.exchange, 3);
+  } finally {
+    process.env.ADMIN_EMAILS = previousAdminEmails;
     server.close();
   }
 });

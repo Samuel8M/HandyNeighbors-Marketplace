@@ -198,6 +198,14 @@ async function signup(db, input, sendVerificationEmail) {
   return { user: getPublicUser(db, userId), session, verification };
 }
 
+// The activity-touch + session-creation that finishes any successful
+// login — split out from login() so the Duo callback in server.js can
+// call it too, once 2FA (not just the password) has actually succeeded.
+function finishLogin(db, userId) {
+  touchActivity(db, userId);
+  return createSession(db, userId);
+}
+
 function login(db, { email, password }) {
   const cleanedEmail = cleanEmail(email);
   const row = db.prepare('SELECT * FROM users WHERE email = ?').get(cleanedEmail);
@@ -206,9 +214,16 @@ function login(db, { email, password }) {
   if (!row || !verifyPassword(String(password || ''), row.password_hash)) {
     throw new AuthError(401, 'Incorrect email or password');
   }
-  touchActivity(db, row.id);
-  const session = createSession(db, row.id);
-  return { user: toPublicUser(syncAdminFlag(db, row)), session };
+  const user = toPublicUser(syncAdminFlag(db, row));
+  // Admins carry real moderation/ban power, so their login (not signup,
+  // which happens once ever) is the surface Duo 2FA gates — see
+  // duoService.js. Whether that's actually enforced (vs. skipped in
+  // dev-mode) is server.js's call: it knows whether Duo is configured,
+  // this function doesn't.
+  if (user.isAdmin) {
+    return { requiresDuo: true, user };
+  }
+  return { user, session: finishLogin(db, row.id) };
 }
 
 async function resendVerification(db, userId, sendVerificationEmail) {
@@ -251,6 +266,7 @@ module.exports = {
   deleteAccount,
   signup,
   login,
+  finishLogin,
   resolveSession,
   destroySession,
   verifyEmail,

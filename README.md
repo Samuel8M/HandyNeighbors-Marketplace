@@ -276,23 +276,49 @@ This is what backs Google Play's Content Ratings "User Content Sharing"
 questions (reporting and blocking user-generated content) — see
 `src/moderationService.js` for the reason/action vocabulary.
 
+## Admin 2FA (Duo Security)
+
+Admin accounts (anyone in `ADMIN_EMAILS`) carry real moderation/ban power,
+so their login — not the one-time signup, the ongoing login — goes through
+[Duo Security](https://duo.com)'s Universal Prompt on top of the usual
+password check; everyone else's signup and login are completely
+unaffected. See `src/duoService.js`.
+
+Set these four environment variables (from a Duo Admin Panel "Web SDK"
+application) to turn it on:
+
+- `DUO_CLIENT_ID`
+- `DUO_CLIENT_SECRET`
+- `DUO_API_HOST`
+- `DUO_REDIRECT_URL` — must exactly match the callback URL registered in
+  that Duo application, always `https://handyneighbors.onrender.com/api/auth/duo/callback`
+  (Duo redirects here regardless of whether the login came from the
+  website or the bundled Android app; the server then hands control back
+  to whichever one started the attempt).
+
+Without all four set, admin login falls back to password-only — same
+dev-mode pattern as `RESEND_API_KEY` in `src/emailSender.js` — so local
+dev and `npm test` never need a real Duo account.
+
 ## Running the tests
 
 ```bash
 npm test
 ```
 
-59 tests: service-level unit tests against an in-memory database (worker
+62 tests: service-level unit tests against an in-memory database (worker
 validation, search filters and sorting, city aggregation, price-matching
 math, ownership enforcement, reports/moderation actions, two-sided
 customer ratings, the 83/90-day retention thresholds) and against
 `authService` directly (signup validation, login, sessions, email
-verification, account deletion, activity tracking), plus HTTP integration
-tests exercising the full signup → verify → post → search → price-check →
-review → update → delete → delete-account lifecycle, reporting content,
-the admin-only moderation routes (gated by `ADMIN_EMAILS`), and a worker
-rating back a customer who reviewed them — cookies, ownership, and rate
-limiting included — through a real Express server.
+verification, account deletion, activity tracking, admin login requiring
+Duo), plus HTTP integration tests exercising the full signup → verify →
+post → search → price-check → review → update → delete → delete-account
+lifecycle, reporting content, the admin-only moderation routes (gated by
+`ADMIN_EMAILS`), a worker rating back a customer who reviewed them, the
+CORS/cookie rules the bundled Android app relies on, and the admin Duo
+2FA round trip (website and in-app, with a fake Duo client) — cookies,
+ownership, and rate limiting included — through a real Express server.
 
 ## Design notes / trade-offs
 

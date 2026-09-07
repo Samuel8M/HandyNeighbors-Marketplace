@@ -822,6 +822,14 @@
     await withLoadingButton(form, 'Logging in…', async () => {
       const data = Object.fromEntries(new FormData(form).entries());
       const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(data) });
+      // Admin accounts get a Duo redirect instead of a completed login —
+      // hand the whole page to Duo's prompt. Whatever page loads after
+      // Duo finishes calls initAuth() on boot same as any other load, so
+      // there's no separate "you're back" step to handle here.
+      if (result.duoRedirectUrl) {
+        window.location.href = result.duoRedirectUrl;
+        return;
+      }
       state.currentUser = result.user;
       $('#auth-modal').hidden = true;
       refreshAuthUI();

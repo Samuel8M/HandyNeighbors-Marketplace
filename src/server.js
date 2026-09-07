@@ -9,6 +9,7 @@ const authSvc = require('./authService');
 const modSvc = require('./moderationService');
 const ratingSvc = require('./ratingService');
 const retentionSvc = require('./retentionService');
+const duoSvc = require('./duoService');
 const { createEmailSender, createNoticeSender } = require('./emailSender');
 const { WorkerServiceError } = svc;
 const { AuthError } = authSvc;
@@ -50,8 +51,11 @@ function isAppOrigin(req) {
   return ALLOWED_APP_ORIGINS.has(req.headers.origin);
 }
 
-function setSessionCookie(req, res, session) {
-  const fromApp = isAppOrigin(req);
+// Split out from setSessionCookie so the Duo callback route (a top-level
+// redirect from Duo's own domain, not a fetch() — it carries no Origin
+// header to detect app-vs-web from) can set the cookie using the origin
+// remembered from the *original* login attempt instead.
+function applySessionCookie(req, res, session, fromApp) {
   res.cookie(SESSION_COOKIE, session.token, {
     httpOnly: true,
     sameSite: fromApp ? 'none' : 'lax',
@@ -59,6 +63,10 @@ function setSessionCookie(req, res, session) {
     expires: new Date(session.expiresAt),
     path: '/',
   });
+}
+
+function setSessionCookie(req, res, session) {
+  applySessionCookie(req, res, session, isAppOrigin(req));
 }
 
 function clearSessionCookie(req, res) {
@@ -141,11 +149,16 @@ function createRateLimiter({ windowMs, max, message }) {
  * in-memory DB.
  *
  * @param {import('node:sqlite').DatabaseSync} db
- * @param {{ sendVerificationEmail?: (email: string, verifyUrl: string) => Promise<object> }} [options]
+ * @param {{ sendVerificationEmail?: (email: string, verifyUrl: string) => Promise<object>, duoClient?: object|null }} [options]
  */
 function createApp(db, options = {}) {
   const app = express();
   const sendVerificationEmail = options.sendVerificationEmail || createEmailSender();
+  // null is a valid, deliberate value here (dev-mode / Duo not configured),
+  // so this can't just be `options.duoClient || duoSvc.createDuoClient()` —
+  // that would ignore an explicit null from a test and call the real
+  // factory anyway.
+  const duoClient = options.duoClient !== undefined ? options.duoClient : duoSvc.createDuoClient();
 
   // Render (and most PaaS hosts) terminate TLS at a proxy and forward
   // plain HTTP internally — without this, req.secure is always false
@@ -237,11 +250,42 @@ function createApp(db, options = {}) {
     }
   });
 
-  app.post('/api/auth/login', authRateLimiter, (req, res, next) => {
+  app.post('/api/auth/login', authRateLimiter, async (req, res, next) => {
     try {
       const result = authSvc.login(db, req.body || {});
-      setSessionCookie(req, res, result.session);
+      // Admins carry moderation/ban power, so their login (unlike everyone
+      // else's) goes through Duo 2FA — but only when Duo is actually
+      // configured; see duoService.js's dev-mode fallback otherwise.
+      if (result.requiresDuo && duoClient) {
+        const redirectUrl = await duoSvc.startDuoAuth(db, duoClient, {
+          userId: result.user.id,
+          username: result.user.email,
+          origin: isAppOrigin(req) ? 'app' : 'web',
+        });
+        return res.json({ duoRedirectUrl: redirectUrl });
+      }
+      const session = result.session || authSvc.finishLogin(db, result.user.id);
+      setSessionCookie(req, res, session);
       res.json({ user: withCustomerRating(result.user) });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Where Duo's Universal Prompt redirects back to after an admin
+  // completes 2FA. A top-level GET navigation, not a fetch — see
+  // applySessionCookie's comment for why the cookie policy comes from the
+  // pending record's remembered origin rather than this request's own
+  // (nonexistent) Origin header.
+  app.get('/api/auth/duo/callback', async (req, res, next) => {
+    try {
+      const { userId, origin } = await duoSvc.completeDuoAuth(db, duoClient, {
+        state: req.query.state,
+        duoCode: req.query.duo_code,
+      });
+      const session = authSvc.finishLogin(db, userId);
+      applySessionCookie(req, res, session, origin === 'app');
+      res.redirect(origin === 'app' ? 'https://localhost/?source=duo#find' : '/?source=duo#find');
     } catch (err) {
       next(err);
     }

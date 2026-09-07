@@ -152,6 +152,18 @@ function createDb(filePath) {
       expires_at TEXT NOT NULL
     );
 
+    -- An admin login mid-Duo-2FA: password already checked, waiting on the
+    -- Duo Universal Prompt redirect to come back (see duoService.js). Very
+    -- short-lived and one-time-use (deleted the moment the callback reads
+    -- it, success or failure) — nothing like a session, just enough state
+    -- to link a callback back to who was logging in and from where.
+    CREATE TABLE IF NOT EXISTS duo_pending (
+      state_hash TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      origin TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+
     -- One row per individual worker, owned by the account that posted it.
     -- No "company" field on purpose: the platform lists people, not
     -- businesses.
