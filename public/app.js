@@ -49,8 +49,9 @@
   }
 
   async function api(path, options = {}) {
-    const res = await fetch(path, {
+    const res = await fetch(window.HN_API_BASE + path, {
       ...options,
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     });
     const text = await res.text();
@@ -876,7 +877,10 @@
   // ---------- Init ----------
 
   function initServiceWorker() {
-    if (!('serviceWorker' in navigator)) return;
+    // Inside the bundled Android app the shell is already 100% local —
+    // caching it again buys nothing and Capacitor's https://localhost
+    // scheme is an unnecessary variable for service worker scope/registration.
+    if (window.Capacitor || !('serviceWorker' in navigator)) return;
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js').catch((err) => {
         console.error('Service worker registration failed:', err);

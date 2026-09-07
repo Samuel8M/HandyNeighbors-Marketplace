@@ -425,3 +425,56 @@ test('login is rate-limited after repeated attempts', async () => {
     server.close();
   }
 });
+
+// The bundled Android app talks to this same API cross-origin (from
+// https://localhost), so it needs an explicit CORS allowance and a cookie
+// willing to travel cross-site — while the plain website (no Origin header)
+// must see byte-identical behavior to before that support existed.
+test('CORS and session cookie attributes depend on the request Origin', async () => {
+  const { server, baseUrl } = startServer();
+  try {
+    const login = (origin) => fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(origin ? { Origin: origin } : {}) },
+      body: JSON.stringify({ email: 'nobody@example.com', password: 'wrong' }),
+    });
+
+    // No Origin header at all (a plain website visit): no CORS headers, and
+    // the failed-login response obviously carries no cookie either way —
+    // this is the "existing browser users are unaffected" regression guard.
+    const plain = await login();
+    assert.equal(plain.headers.get('access-control-allow-origin'), null);
+    assert.equal(plain.headers.get('access-control-allow-credentials'), null);
+
+    // An origin nobody allow-listed: also nothing, reject-by-default.
+    const untrusted = await login('https://evil.example');
+    assert.equal(untrusted.headers.get('access-control-allow-origin'), null);
+
+    // The bundled app's origin: explicit CORS allowance reflected back.
+    const fromApp = await login('https://localhost');
+    assert.equal(fromApp.headers.get('access-control-allow-origin'), 'https://localhost');
+    assert.equal(fromApp.headers.get('access-control-allow-credentials'), 'true');
+
+    // Now check the cookie attributes themselves on a successful auth call,
+    // once from the website and once from the app.
+    const signupFromWeb = await fetch(`${baseUrl}/api/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(signupPayload()),
+    });
+    const webCookie = signupFromWeb.headers.get('set-cookie');
+    assert.match(webCookie, /SameSite=Lax/i);
+    assert.doesNotMatch(webCookie, /Secure/i); // plain http:// in tests, so req.secure is false
+
+    const signupFromApp = await fetch(`${baseUrl}/api/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://localhost' },
+      body: JSON.stringify(signupPayload()),
+    });
+    const appCookie = signupFromApp.headers.get('set-cookie');
+    assert.match(appCookie, /SameSite=None/i);
+    assert.match(appCookie, /Secure/i);
+  } finally {
+    server.close();
+  }
+});
