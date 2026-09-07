@@ -10,8 +10,9 @@
   }
 
   async function api(path, options = {}) {
-    const res = await fetch(path, {
+    const res = await fetch(window.HN_API_BASE + path, {
       ...options,
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     });
     const text = await res.text();

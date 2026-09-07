@@ -10,7 +10,9 @@
     return;
   }
   try {
-    const res = await fetch(`/api/auth/verify-email?token=${encodeURIComponent(token)}`);
+    const res = await fetch(`${window.HN_API_BASE}/api/auth/verify-email?token=${encodeURIComponent(token)}`, {
+      credentials: 'include',
+    });
     const body = await res.json();
     if (!res.ok) throw new Error(body.error || 'Verification failed.');
     heading.textContent = "You're verified! ✅";

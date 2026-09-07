@@ -1,0 +1,8 @@
+{
+  "appId": "com.handyneighbors.app",
+  "appName": "HandyNeighbors",
+  "webDir": "public",
+  "server": {
+    "androidScheme": "https"
+  }
+}

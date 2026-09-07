@@ -15,6 +15,12 @@
     "node": ">=22.13"
   },
   "dependencies": {
+    "@duosecurity/duo_universal": "^3.1.0",
     "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^8.5.1",
+    "@capacitor/cli": "^8.5.1",
+    "@capacitor/core": "^8.5.1"
   }
 }

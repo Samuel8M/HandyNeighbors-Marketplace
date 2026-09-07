@@ -49,8 +49,9 @@
   }
 
   async function api(path, options = {}) {
-    const res = await fetch(path, {
+    const res = await fetch(window.HN_API_BASE + path, {
       ...options,
+      credentials: 'include',
       headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
     });
     const text = await res.text();
@@ -821,6 +822,14 @@
     await withLoadingButton(form, 'Logging in…', async () => {
       const data = Object.fromEntries(new FormData(form).entries());
       const result = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(data) });
+      // Admin accounts get a Duo redirect instead of a completed login —
+      // hand the whole page to Duo's prompt. Whatever page loads after
+      // Duo finishes calls initAuth() on boot same as any other load, so
+      // there's no separate "you're back" step to handle here.
+      if (result.duoRedirectUrl) {
+        window.location.href = result.duoRedirectUrl;
+        return;
+      }
       state.currentUser = result.user;
       $('#auth-modal').hidden = true;
       refreshAuthUI();
@@ -876,7 +885,10 @@
   // ---------- Init ----------
 
   function initServiceWorker() {
-    if (!('serviceWorker' in navigator)) return;
+    // Inside the bundled Android app the shell is already 100% local —
+    // caching it again buys nothing and Capacitor's https://localhost
+    // scheme is an unnecessary variable for service worker scope/registration.
+    if (window.Capacitor || !('serviceWorker' in navigator)) return;
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js').catch((err) => {
         console.error('Service worker registration failed:', err);

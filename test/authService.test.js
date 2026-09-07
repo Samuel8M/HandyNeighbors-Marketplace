@@ -96,6 +96,22 @@ test('login succeeds with the right password and fails with the wrong one', asyn
   );
 });
 
+test('login for an admin account returns requiresDuo instead of a session', async () => {
+  const previousAdminEmails = process.env.ADMIN_EMAILS;
+  try {
+    const db = freshDb();
+    await authSvc.signup(db, baseSignup(), fakeEmailSender());
+    process.env.ADMIN_EMAILS = 'jordan@example.com';
+
+    const result = authSvc.login(db, { email: 'jordan@example.com', password: 'correct horse battery staple' });
+    assert.equal(result.requiresDuo, true);
+    assert.equal(result.user.isAdmin, true);
+    assert.equal(result.session, undefined);
+  } finally {
+    process.env.ADMIN_EMAILS = previousAdminEmails;
+  }
+});
+
 test('login fails for an unknown email with the same message as a wrong password', async () => {
   const db = freshDb();
   await authSvc.signup(db, baseSignup(), fakeEmailSender());
